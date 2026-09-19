@@ -205,6 +205,7 @@ EMI 版本：`1.1.24+1.21.1`（Modrinth 标注 `client_only`，这也是本 Mod 
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
+./gradlew test           # 83 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 
@@ -213,6 +214,44 @@ wrapper 已经生成好了，不需要本机装 Gradle。用 IDE 的话直接把
 **已验证**：`BUILD SUCCESSFUL`，产出 `build/libs/craftgraph-0.1.0.jar`，
 包含 `CraftGraph`、`MainThreadDispatcher`、`DiscoveryFile`、`api.Models.*`。
 不设 `JAVA_HOME` 也能构建（toolchain 从 PATH 找到 JDK 21）。
+
+## 发布到 Maven
+
+```bash
+# 凭据只从环境变量读，不写进仓库
+export K_MAVEN_USERNAME=... K_MAVEN_TOKEN=...    # Git Bash
+# $env:K_MAVEN_USERNAME='...'                    # PowerShell
+# set K_MAVEN_USERNAME=...                       # cmd.exe
+
+./gradlew publish
+```
+
+产物坐标 `dev.craftgraph:craftgraph:<version>`，含 sources jar。
+
+只想验证产物本身对不对，用 `./gradlew publishToMavenLocal` —— 它不需要凭据，
+会写到 `~/.m2/repository/`，可以拿来检查生成的 POM。
+
+没设环境变量时不会得到一个含糊的 401，而是明确告诉你缺哪两个变量以及怎么设 ——
+这段提示在 `publishToMavenRepository` 任务的 `doFirst` 里。放在任务里而不是配置阶段，
+是因为日常 `gradlew build` 不该因为没设发布凭据而失败。
+
+### ⚠️ gradle.properties 是 ISO-8859-1 读的
+
+**Gradle 按 ISO-8859-1 读取 `gradle.properties`**（为保证向后兼容，是既定行为）。
+那里写非 ASCII 字符会变成乱码，而且这个值会被展开进 `neoforge.mods.toml` ——
+症状是**游戏里的 Mod 描述显示成一堆 `æè¿è¡ä¸ç Minecraft...`**。
+
+所以：
+
+| 内容 | 放哪 | 编码 |
+|---|---|---|
+| 中文 Mod 描述（玩家看到的） | `src/main/templates/META-INF/neoforge.mods.toml` | UTF-8 |
+| 英文描述（Maven 消费者看到的） | `gradle.properties` 的 `mod_description` | 只能 ASCII |
+| 其余元信息（id/name/license/version） | `gradle.properties` | ASCII |
+
+`generateModMetadata` 里显式设了 `filteringCharset = 'UTF-8'`，
+不依赖 JVM 默认字符集 —— 否则哪天有人带 `-Dfile.encoding` 跑构建又会变乱码。
+
 
 ### 构建偶发失败先重试
 

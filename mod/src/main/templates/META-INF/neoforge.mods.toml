@@ -7,7 +7,13 @@ modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
-description = '''${mod_description}'''
+# 中文描述写在这里，不放在 gradle.properties。
+#
+# 原因：Gradle 按 ISO-8859-1 读取 gradle.properties（为保证向后兼容，是既定行为），
+# 那里的非 ASCII 字符会被读成乱码，然后原样展开到这里 —— 游戏里就会显示一堆
+# "æè¿è¡ä¸ç Minecraft..."。这个模板文件是 UTF-8，配合 build.gradle 里显式设置的
+# filteringCharset = 'UTF-8'，中文才能正确保留。
+description = '''把运行中的 Minecraft 配方数据通过本地 HTTP 暴露给 AI 客户端，供配方查询与产线规划使用。'''
 
 # 只装在客户端。配方查看器（JEI/EMI）本身就是客户端模组，
 # 而配方数据在客户端也是全量的（原版靠它做配方书），所以没必要做成双端模组。
