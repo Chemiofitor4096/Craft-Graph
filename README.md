@@ -151,25 +151,47 @@ class of threading bugs.
 
 ## Status
 
-Verified end to end on a real 1.21.1 instance: 1290 recipes indexed, 2% flagged unreadable,
-27 ms main-thread extraction, AI client connected with zero configuration.
+Verified end to end on a real 1.21.1 instance: 1290 recipes indexed, 3% flagged unreadable,
+37 ms main-thread extraction, AI client connected with zero configuration.
 
 | | |
 |---|---|
-| Bridge mod | Works. 83 JUnit tests, none of which need Minecraft |
+| Bridge mod | Works. 104 JUnit tests, none of which need Minecraft |
 | MCP server | Works. 41 algorithm tests, MCP protocol tests, cross-language contract tests |
 | Recipe coverage | All recipe types are read. 5 of the 7 types present in vanilla are 100% readable |
+| Machine & duration data | Every recipe gets a machine; the 112 cooking recipes get a duration. Energy is not exposed by vanilla at all — it stays `null` rather than being invented |
 | Modded recipes | Not yet measured — see limitations below |
 | EMI integration | Not started (would improve coverage on heavy tech packs) |
 | In-game UI | Out of scope for the MVP by design |
 
 ## Known limitations
 
-**Unreadable recipes are real, and they are counted.** On vanilla, 29 of 1290 recipes are
-flagged `opaque`. 18 of those are armour-trim smithing, whose ingredients Minecraft does not
-expose declaratively — that is a platform limitation, not a parsing failure. The rest are
-code-driven special recipes (dyeing, map cloning, fireworks). Run `npm run inspect` to see
-the breakdown by recipe type for your own pack.
+**Unreadable recipes are real, and they are counted.** On vanilla, 40 of 1290 recipes are
+flagged `opaque`: 27 smithing recipes and 13 code-driven special recipes (dyeing, map cloning,
+fireworks, banner duplication). Run `npm run inspect` to see the breakdown by recipe type for
+your own pack.
+
+The smithing 27 are worth knowing about in detail, because they are the ones players ask about
+most (netherite gear). `SmithingRecipe` does not override `getIngredients()`, so the inherited
+default returns an empty list and there is nothing declarative to read — the three slots are
+only reachable through `isTemplateIngredient` / `isBaseIngredient` / `isAdditionIngredient`.
+Marking them `opaque` is the honest answer, and the AI is told to say "I cannot read this"
+instead of "this needs no materials".
+
+Observed behaviour when asked "how do I make a netherite helmet": the AI did relay "the input
+cannot be read, and that does not mean it needs no materials" — then went on to describe the
+vanilla recipe from its own training data, explicitly labelled as not coming from the game.
+On vanilla that happens to be right. On a modpack, where a KubeJS script or another mod may
+have changed it, the same sentence would be confidently wrong. **`opaque` prevents a *silent*
+wrong answer; it does not stop the model from filling the gap with memory.** Recovering the
+smithing ingredients (iterate the item registry, test the three predicates) is possible but has
+not been done — and it is worth more than the raw coverage number suggests.
+
+**Machine counts only cover part of the chain.** Vanilla has no duration field for crafting
+recipes, so workbench steps are reported as manual rather than as a machine count. That is
+correct — you do not build a crafting table per craft — but it means a plan for something like
+a torch reports machines only for the smelting step. `get_bridge_status` states the coverage
+numbers explicitly so the AI can caveat its answer.
 
 **Not yet tested against a large tech pack.** Modded machine recipes are the interesting case,
 and they are the ones most likely to be `opaque`. If you try it on a big pack, that number
