@@ -138,6 +138,15 @@ function parseMachine(detail: string): string | null {
 }
 
 const rows: { label: string; tokens: number; chars: number }[] = [];
+
+/**
+ * 本次运行**没能验证**的段落。
+ *
+ * 条件断言（「装了 X 才测」）最危险的失效方式是「条件不成立所以什么都没测，
+ * 而输出看起来一切正常」。所以跳过的段落必须单独列出来，
+ * 让「全部通过」这句话不至于误导人。
+ */
+const skippedSections: string[] = [];
 let failures = 0;
 
 function textOf(result: unknown): string {
@@ -460,6 +469,81 @@ try {
     }
   }
 
+  // ============================================================ Create（软依赖适配器）
+  //
+  // mod 侧有 CreateAdapter，靠 Create 的 ProcessingRecipe API 读多产出 / 概率 / 流体 / 耗时。
+  // 它是**软依赖**：没装 Create 时适配器根本不注册。
+  //
+  // 所以这一段是条件断言：
+  //   装了 Create → 逐条验证适配器真的生效了
+  //   没装       → **明确打印「本段未验证」**，而不是静默通过
+  //
+  // 后者是刻意的。这个项目最贵的一次教训就是「测试全绿而功能是死的」，
+  // 而条件断言最危险的失效方式，正是「条件不成立所以什么都没测，但输出看着一切正常」。
+  const allTypes = textOf(await client.callTool({ name: "list_recipe_types", arguments: {} }));
+  const createTypes = [...allTypes.matchAll(/`(create:[a-z_]+)`/g)].map((m) => m[1]!);
+  const hasCreate = createTypes.length > 0;
+
+  if (!hasCreate) {
+    skippedSections.push("Create 适配器（本实例没装 Create）");
+    process.stdout.write(
+      "\n⚠️  本实例没装 Create，**Create 适配器这段没有验证**。\n" +
+        "   它读的是 ProcessingRecipe 的多产出/概率/流体/耗时，只有装了 Create 才跑得到。\n" +
+        "   要验证请在装了 Create 的实例上跑（本项目的 P2 大包测试就是这种实例）。\n\n",
+    );
+  } else {
+    process.stdout.write(`检测到 Create（${createTypes.length} 种配方类型）\n`);
+
+    // 找一条 Create 的处理类配方：拿被加工的常见物品反查。
+    // 用类型标签过滤，因为这些物品同时也有原版的合成/熔炼配方。
+    const createProbes = ["minecraft:iron_ore", "minecraft:andesite", "minecraft:gravel"];
+    let sample: { id: string; typeLabel: string } | undefined;
+    for (const probe of createProbes) {
+      const list = textOf(await client.callTool({ name: "get_recipes_for_input", arguments: { item: probe } }));
+      sample = parseRecipeEntries(list).find((e) => /crushing|milling|mixing|compacting|pressing|splashing/i.test(e.typeLabel));
+      if (sample) break;
+    }
+
+    check("在装了 Create 的实例上找到了处理类配方样本", sample !== undefined, `探测物品：${createProbes.join(" / ")}`);
+
+    if (sample) {
+      const detail = textOf(
+        await client.callTool({ name: "get_recipe_details", arguments: { recipeId: sample.id } }),
+      );
+      process.stdout.write(`\n· Create 样本 → \`${sample.id}\`（${sample.typeLabel}）\n${detail}\n\n`);
+
+      const guaranteed = (detail.match(/^输出：\n((?:- .*\n)*)/m)?.[1] ?? "").split("\n").filter((l) => l.startsWith("- "));
+      const chances = [...detail.matchAll(/概率 ([\d.]+)%/g)].map((m) => Number(m[1]));
+      const hasFluid = /mB/.test(detail.split("输入：")[1] ?? "") || /- \d+ mB/.test(detail);
+
+      // ① 耗时：Create 机器能不能算出真实台数的关键，而视图器给不了这个数据
+      check(
+        `Create 配方读到了耗时（${sample.typeLabel}）`,
+        /- 耗时：\d+ 刻/.test(detail),
+        detail.split("\n").slice(0, 8).join(" / "),
+      );
+      // ② 多产出：create:crushing 一条配方有 3 个产出。只读 getResultItem 的话只会回来 1 个，
+      //    而且不会报错 —— 这正是这个适配器存在的理由。
+      check(
+        `Create 配方读到了多个产出（必然 ${guaranteed.length} 个 + 概率 ${chances.length} 个）`,
+        guaranteed.length + chances.length >= 2,
+        detail.slice(0, 500),
+      );
+      // ③ 概率：必须落在 0~1。Create 的 sequenced_assembly 用 chance 当权重（见过 120.0），
+      //    那种值若漏进 chanceOutputs，期望值会被算成几十倍。
+      check(
+        "概率产出的概率都在 0~1 之间（权重语义没有漏进来）",
+        chances.every((c) => c > 0 && c < 100),
+        `概率 = ${chances.join(", ")}%`,
+      );
+      // ④ 流体：compacting 那种「燧石×2 + 砂砾 + 100mB 岩浆」里的岩浆。
+      //    漏掉它不报错，只会让原料表看起来完整却少了东西。
+      if (/compacting|mixing|filling/i.test(sample.typeLabel)) {
+        check(`Create 的${sample.typeLabel}配方读到了流体`, hasFluid, detail.slice(0, 600));
+      }
+    }
+  }
+
   // ============================================================ 产线（机器数）
   //
   // 字段补上之后，这一段才真正验证到「机器数算得出来」。
@@ -507,5 +591,15 @@ for (const r of rows) {
   process.stdout.write(`| ${r.label} | ${r.chars.toLocaleString()} | ${r.tokens.toLocaleString()} |\n`);
 }
 
-process.stdout.write(`\n${failures === 0 ? "全部通过" : `${failures} 项失败`}\n\n`);
+process.stdout.write(`\n${failures === 0 ? "全部通过" : `${failures} 项失败`}\n`);
+
+// 跳过的段落单独报。没有这一段的话，「全部通过」会被读成「所有东西都验过了」，
+// 而实际上条件断言里的那些一条都没跑 —— 那正是这个项目最贵的一次教训的形状。
+if (skippedSections.length > 0) {
+  process.stdout.write(
+    `\n⚠️  未验证的段落（不是通过，是没测）：\n${skippedSections.map((s) => `     · ${s}`).join("\n")}\n`,
+  );
+}
+process.stdout.write("\n");
+
 if (failures > 0) process.exitCode = 1;

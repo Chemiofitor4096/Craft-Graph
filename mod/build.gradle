@@ -29,11 +29,19 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 java.withSourcesJar()
 
 repositories {
-    // EMI / JEI 是软依赖，编译期需要它们的 API。开启时取消注释：
-    //
+    // 软依赖的模组在这里取编译期 API。**都是 compileOnly**：
+    // 只用来让编译器核对我们的调用是否与真实 API 一致，产物里不包含它们、也不依赖它们。
+    // 运行时装了就启用对应适配器，没装就退回通用读取（见 RecipeAdapters 的惰性注册）。
+
+    // Create（加工配方的多产出 / 概率 / 流体 / 耗时只能从它的 API 读，见 CreateAdapter）
+    maven {
+        name = 'CreateMod'
+        url = 'https://maven.createmod.net'
+    }
+
+    // EMI / JEI 以后接视图器时在这里加：
     // EMI（客户端模组，Maven 坐标见 https://modrinth.com/mod/emi）
     // maven { url = 'https://maven.terraformersmc.com/releases/' }
-    //
     // JEI
     // maven { url = 'https://maven.blamejared.com/' }
 }
@@ -126,6 +134,23 @@ dependencies {
     // 支持 record 和 serializeNulls」，换一个版本去测等于没测。
     // 升级 Minecraft 时用 gradlew dependencies --configuration compileClasspath 核对。
     testImplementation 'com.google.code.gson:gson:2.10.1'
+
+    // ---- 软依赖模组（只编译期）----
+    //
+    // compileOnly：产物里没有它，运行时不要求它存在。
+    // 这一条依赖的作用**只是让编译器核对我们的调用与 Create 真实 API 一致** ——
+    // 方法名、参数、返回类型全都会被检查。没有它就只能靠反射，那样连拼写错误都发现不了。
+    //
+    // 版本对齐 1.21.1 上当前发布的最新版。注意它的版本号带构建号（6.0.11-300 而不是 6.0.11），
+    // 少写那个后缀会解析不到。换版本时注意：ProcessingRecipe 的几个访问器在 6.x 内是稳定的，
+    // 但我们只编译验证过这一版。
+    //
+    // transitive = false：我们只需要 Create 自己的类来做类型检查，
+    // 不碰它的实现依赖（Registrate 等还分散在别的仓库）。
+    // 打开传递依赖会把一堆与本次编译无关的仓库都拖进来，而它们对「方法签名对不对」毫无帮助。
+    compileOnly('com.simibubi.create:create-1.21.1:6.0.11-300') {
+        transitive = false
+    }
 }
 
 tasks.named('test', Test).configure {

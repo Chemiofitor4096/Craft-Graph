@@ -14,6 +14,8 @@
 | 8 | **`duration` / `machine` 用原版接口读，不等 EMI** | 曾经以为「原版 API 拿不到这两个字段，接 EMI 后补」，于是它们被写成 `null` —— 结果真实数据里 1290 条配方**全是 null**，`calculate_production_plan` 的机器数计算整个失效，而四个测试层全绿（夹具里手写了 duration）。核实反编译源码后发现原版完全给得出：`AbstractCookingRecipe#getCookingTime()` 给耗时，`Recipe#getToastSymbol()` 给机器。**「等一个未来依赖」是最容易把字段留成 null 的理由**，而 null 会一路静默传进产线结果。 | 低。适配器层是加法，接 EMI 时在同一个登记处加更全的适配器即可。 |
 | 9 | **锻造用访问转换器读，不靠视图器** | 27 条锻造配方读不到输入，是因为 `SmithingRecipe` 不覆写 `getIngredients()`，三个槽位藏在 `SmithingTransformRecipe` / `SmithingTrimRecipe` 的**包私有字段**里。原版接口只剩三个谓词，用它们反推只能得到物品集合、会丢掉标签身份。而访问转换器（`META-INF/accesstransformer.cfg`）能把字段变公开 —— **JEI 做的就是这件事**，它不是哪个 mod 的特权。于是这 27 条不装 JEI/EMI 就能修，opaque 从 40 降到 31。 | 低。AT 只在 1.21.1 上验证；字段改名会**编译失败**（适配器读的正是那些字段），`validateAccessTransformers` 再兜一层。 |
 | 10 | **适配器用 `null` 与空列表区分「不归我管」和「确定读不到」** | 修锻造时差点制造一个静默错误答案：`SmithingTrimRecipe#getResultItem()` 返回硬编码的「铁胸甲」占位符，只补输入会让输入非空、`Readability` 判定可读，那个占位符就从「被标记的假数据」升级成「理直气壮的答案」。所以适配器必须能表达「产出我确定读不到」—— 这个语义只能用空列表说，而「用通用接口的结果」用 `null`。两者混为一谈就会退回那个假答案。 | 低。约定写在接口注释里，`SmithingAdapter` 的两个分支是第一个用例。 |
+| 11 | **模组适配器一律惰性注册 + `compileOnly` 编译验证** | `CreateAdapter` 直接引用 Create 的类，一旦放进静态列表，**类加载就会连带解析它们** —— 没装 Create 的实例会在构建快照时 `NoClassDefFoundError`，整个桥接不可用。所以列表懒建、先用 `ModList.isLoaded` 判断、`new` 留在 lambda 里（JVM 按指令惰性解析），外面再包 `catch (Throwable)` 把后果限定成「少一个适配器」。编译期用 `compileOnly` + `transitive = false`：**它的作用是让编译器逐条核对我们的调用与真实 API 一致**，比反射强得多（反射连拼写错误都发现不了）。 | 低。加模组适配器时照这个模式写。实测：原版实例启动后日志里 `NoClassDefFoundError` 出现 0 次。 |
+| 12 | **条件断言必须显式报「未验证」，不能静默跳过** | `npm run live` 里的 Create 段落只在装了 Create 的实例上有意义。条件断言最危险的失效方式是「条件不成立所以什么都没测，而输出看起来一切正常」—— 这正是本项目最贵那次教训的形状（`duration` 全是 null 而四层全绿）。所以跳过的段落会单独列在结尾，把「全部通过」和「所有东西都验过了」区分开。 | 低。多打三行字，换来的是「绿色」这个词不含糊。 |
 
 ## 环境要求
 

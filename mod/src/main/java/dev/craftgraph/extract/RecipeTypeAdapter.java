@@ -3,6 +3,8 @@ package dev.craftgraph.extract;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 
 import java.util.List;
 
@@ -78,5 +80,49 @@ public interface RecipeTypeAdapter {
      */
     default List<ItemStack> results(Recipe<?> recipe) {
         return null;
+    }
+
+    /**
+     * 概率产出（必然产出的那一部分由 {@link #results} 给）。
+     *
+     * <p>分开是因为下游算法不同：必然产出直接乘合成次数，概率产出要乘概率。
+     * 混在一起会让「必然产出 1 个」被当成「期望 1 个」——看起来一样，语义不同，
+     * 而概率不是 1 时就会直接把产量算错。
+     *
+     * @return {@code null} 表示没有概率产出；概率必须落在 (0, 1) 开区间
+     */
+    default List<ChanceResult> chanceResults(Recipe<?> recipe) {
+        return null;
+    }
+
+    /**
+     * 流体输出（协议里的 {@code fluidOutputs}）。
+     *
+     * @return {@code null} 表示没有
+     */
+    default List<FluidStack> fluidResults(Recipe<?> recipe) {
+        return null;
+    }
+
+    /**
+     * 流体输入。
+     *
+     * <p>必须能读出来 —— 漏掉它不会报错，只会让原料表**看起来完整却少了东西**。
+     * Create 的 compacting 就是「燧石×2 + 砂砾 + 100mB 岩浆」，
+     * 少了岩浆玩家会照着建一条错的产线。
+     *
+     * @return {@code null} 表示没有流体输入
+     */
+    default List<SizedFluidIngredient> fluidIngredients(Recipe<?> recipe) {
+        return null;
+    }
+
+    /**
+     * 一个概率产出。
+     *
+     * @param stack  产出的物品
+     * @param chance 概率，必须落在 (0, 1) 开区间 —— 边界由 {@link ResultChance} 判过
+     */
+    record ChanceResult(ItemStack stack, float chance) {
     }
 }

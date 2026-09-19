@@ -234,17 +234,31 @@ correct — you do not build a crafting table per craft — but it means a plan 
 a torch reports machines only for the smelting step. `get_bridge_status` states the coverage
 numbers explicitly so the AI can caveat its answer.
 
-**Modded machine recipes are the next real gap, and a recipe viewer can only fix part of it.**
-Inspecting Create's own recipe data (1843 recipes, 15 of its own types) shows what those look
-like: inputs are declared declaratively, but `results` is a *list* with per-entry `count` and
-`chance`, `processingTime` carries the duration, and fluids appear alongside items in both
-directions. Our extractor reads a single output from `getResultItem()`, so a Create crushing
-recipe (3 results, two of them at `chance: 0.75`) would come back with one output and no
-probabilities — incomplete rather than flagged. Multistep recipes like `sequenced_assembly`
-nest a whole `sequence` of sub-recipes, and would look readable while omitting most of the real
-cost. Both are work items, not viewer problems: JEI and EMI can reveal the multiple outputs,
-neither exposes `processingTime`, and a nested sequence needs a dedicated adapter or an honest
-`opaque`.
+**Modded machine recipes are partly covered, and a recipe viewer can only fix part of the
+rest.** Inspecting Create's own recipe data (1843 recipes, 15 of its own types) showed what
+those recipes look like: inputs are declared declaratively, but `results` is a *list* with
+per-entry `count` and `chance`, `processingTime` carries the duration, and fluids appear
+alongside items in both directions.
+
+So the mod now ships a Create adapter (soft dependency — no Create installed, no adapter, and
+no crash) that reads all four: multiple outputs, per-output probability, fluids both ways, and
+the processing time. That turns a Create crushing recipe from "1 of 3 outputs, no probabilities,
+no duration" into the real thing — and `processingTime` is what lets Create machines get a real
+machine count. **No recipe viewer can supply that**: JEI and EMI expose no concept of duration at
+all.
+
+What is still missing, and why it is not a viewer problem either:
+
+- `sequenced_assembly` nests a whole list of sub-recipes. Read naively it would *look* readable
+  while omitting most of the real material cost, so it needs a dedicated adapter or an honest
+  `opaque`. It is not covered yet.
+- **Machine names for modded recipes need JEI.** Create does not override `getToastSymbol()`,
+  so its recipes get the interface default (`crafting_table`) which we deliberately refuse to
+  trust — and there is no reliable way to derive the machine from the recipe type either
+  (Create's sandpaper is an *item*, splashing and haunting share one machine, filling/emptying
+  split across a spout and a drain). JEI's catalysts are the authoritative answer, which is why
+  JEI is the first viewer to integrate rather than EMI.
+- Energy is still `null` everywhere.
 
 **Not yet tested against a large tech pack.** Modded machine recipes are the interesting case,
 and they are the ones most likely to be `opaque`. If you try it on a big pack, that number

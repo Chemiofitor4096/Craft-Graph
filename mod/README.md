@@ -24,29 +24,55 @@
 | 配方抽取 `extract/RecipeExtractor` | ✅ | 真游戏跑通；`duration` / `machine` 由 `npm run live` 逐条断言 |
 | 类型特有字段的适配器 `extract/RecipeAdapters` | 🟡 | 耗时靠 `instanceof` 派发，**只能靠 `npm run live` 验证**（见下） |
 | 锻造输入/产出适配器 `extract/SmithingAdapter` + 访问转换器 | ✅ | 真游戏跑通：opaque 40 → 31，9 条下界合金可读、18 条纹饰不再报假产物 |
+| Create 适配器 `extract/CreateAdapter`（多产出/概率/流体/耗时） | 🟡 | 编译对着 Create 真实 jar 验过；**运行路径需要装了 Create 的实例**（见下） |
+| 产出概率分类 `extract/ResultChance` | ✅ | `ResultChanceTest`（5 用例，含 NaN / >1 / 0 边界） |
 | 访问转换器文件守卫 `AccessTransformerTest` | ✅ | 3 用例（钉住 AT 与适配器的配套关系） |
 | 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
 | 配方查看器集成（JEI 优先） | ⬜ | 只补「只有视图器才知道的东西」，见下 |
 
-**测试共 107 个用例，全部不需要启动 Minecraft。**
+**测试共 115 个用例，全部不需要启动 Minecraft。**
 
 ### 哪些东西测不了，只能靠进游戏
 
-`RecipeAdapters` 的派发判据是 `instanceof AbstractCookingRecipe` / `instanceof SmithingTrimRecipe`，
-这需要真实的 MC 类才能验证，而测试源码集**看不到 Minecraft**（ModDevGradle 只把它加到主源码集）。
-所以：
+`RecipeAdapters` 的派发判据是 `instanceof AbstractCookingRecipe` / `instanceof SmithingTrimRecipe` /
+`instanceof ProcessingRecipe`，这需要真实的 MC 类（Create 那条还需要真实的 Create 类）才能验证，
+而测试源码集**看不到 Minecraft、也看不到 Create**。所以：
 
 | 部分 | 谁来验证 |
 |---|---|
-| 类型→机器对照表、字段覆盖度审计、AT 文件内容 | JUnit（纯逻辑，不碰 MC） |
-| `instanceof` 派发是否真的匹配那 4 种烹饪配方 / 两个锻造子类 | **`npm run live`**，在真游戏上按类型逐条核对 |
+| 类型→机器对照表、字段覆盖度审计、产出概率分类、AT 文件内容 | JUnit（纯逻辑，不碰 MC） |
+| `instanceof` 派发是否真的匹配那 4 种烹饪配方 / 两个锻造子类 | **`npm run live`**，在真游戏上逐条核对 |
 | 锻造的输入真的读到了、假产物真的没出现 | **`npm run live`**，见 live.ts 的锻造段 |
+| **Create 适配器的运行行为** | **只能靠装了 Create 的实例**。本机 dev 实例没装 Create，所以这条路径**尚未被实测** —— 能验证的只有「编译对着真实 jar 通过」和「没装 Create 时不会崩」 |
+| 没装 Create 时不会因类加载而崩 | 真机启动（日志里 `NoClassDefFoundError` 出现 0 次）+ `npm run live` |
+
+`npm run live` 里的 Create 那一段是**条件断言**：装了 Create 就逐条验，
+没装就**明确打印「本段未验证」**并在结尾的「未验证的段落」里列出来。
+条件断言最危险的失效方式是「条件不成立所以什么都没测，而输出看起来一切正常」，
+所以它不能只是静默跳过。
+
+### 软依赖模组适配器：必须惰性注册
+
+`CreateAdapter` 直接引用 Create 的类。**一旦它被放进静态列表，类加载就会连带解析那些类**，
+没装 Create 的实例会在构建快照时直接 `NoClassDefFoundError` —— 整个桥接都不可用。
+
+所以 `RecipeAdapters` 的列表是懒建的，并且先用 `ModList.isLoaded("create")` 判断，
+`new CreateAdapter()` 留在 lambda 里（JVM 按指令惰性解析类，分支不执行就不会去找那个类）。
+外面还包了 `catch (Throwable)`：万一将来某个模组的类加载出别的问题，
+后果应该是「少一个适配器」，而不是「整个快照建不出来」。
+**实测**：原版实例（没装 Create）启动 → 1290 条配方、opaque 31，
+日志里 `NoClassDefFoundError` / `ClassNotFoundException` / `CreateAdapter` 出现 **0 次**。
+
+源码里引用模组 API 用 `compileOnly` 且 `transitive = false`。它的作用**只是让编译器
+逐条核对我们的调用与真实 API 一致** —— 方法名、参数、返回类型都会被检查；
+没有它就只能靠反射，那样连拼写错误都发现不了。
+（关掉传递依赖是因为 Create 的实现依赖散落在别的仓库，而它们对「签名对不对」毫无帮助。）
 
 这条分工是交过学费的：`duration` 曾经在真数据里全是 `null`，而所有 JUnit 用例全绿。
 **「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 107 用例
+cd mod && ./gradlew test        # Java 侧 115 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -272,7 +298,7 @@ EMI 的 API 同样核实过：`EmiRecipe#getInputs()/getOutputs()/getCatalysts()
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 107 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 115 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 

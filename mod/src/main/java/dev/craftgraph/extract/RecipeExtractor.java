@@ -16,6 +16,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -184,6 +186,30 @@ public final class RecipeExtractor {
             inputs.add(normalized);
         }
 
+        // 流体输入。漏掉它不会报错，只会让原料表看起来完整却少了东西 ——
+        // Create 的 compacting 是「燧石×2 + 砂砾 + 100mB 岩浆」，少了岩浆玩家会照着建错产线。
+        // 数量单位是 mB，复用同一套标签还原逻辑（流体也有标签，比如 #c:lava）。
+        for (SizedFluidIngredient fluidIngredient : RecipeAdapters.fluidIngredients(recipe)) {
+            Set<String> fluidIds = new LinkedHashSet<>();
+            for (FluidStack stack : fluidIngredient.ingredient().getStacks()) {
+                if (stack.isEmpty()) continue;
+                ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(stack.getFluid());
+                if (fluidId != null) fluidIds.add(fluidId.toString());
+            }
+            if (fluidIds.isEmpty()) continue;
+
+            Models.Ingredient normalized = IngredientNormalizer.normalize(
+                    Models.Ingredient.KIND_FLUID, fluidIngredient.amount(), new ArrayList<>(fluidIds), fluidTags);
+            if (normalized == null) {
+                opaque = true;
+                break;
+            }
+            inputs.add(normalized);
+        }
+        // 判据用总数而不是物品槽位的数量：一个物品输入都没有、但读到了流体输入，
+        // 同样算「读到了输入」（只吃流体的配方是存在的）。
+        int inputCount = inputs.size();
+
         // 产物。注意很多模组配方这条返回 EMPTY —— 那种情况我们会得到一个空 outputs，
         // 必须靠 opaque 标记让下游知道「不是没有产出，是我们读不到」。
         //
@@ -201,6 +227,21 @@ public final class RecipeExtractor {
             outputs.add(toItemStack(stack));
         }
 
+        // 概率产出与流体产出。三者相加才是「这条配方到底产出什么」——
+        // 只数必然产出的话，Create 的洗涤配方（产出全是 chance: 0.25 / 0.05）
+        // 会被判成「读不到产出」而整条被产线计算跳过。
+        List<Models.ChanceOutput> chanceOutputs = new ArrayList<>();
+        for (RecipeTypeAdapter.ChanceResult chance : RecipeAdapters.chanceResults(recipe)) {
+            chanceOutputs.add(new Models.ChanceOutput(toItemStack(chance.stack()), chance.chance()));
+        }
+
+        List<Models.FluidStack> fluidOutputs = new ArrayList<>();
+        for (FluidStack stack : RecipeAdapters.fluidResults(recipe)) {
+            ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(stack.getFluid());
+            if (fluidId == null) continue;
+            fluidOutputs.add(new Models.FluidStack(fluidId.toString(), stack.getAmount()));
+        }
+
         // 用统一的判定规则。注意它也检查「没有输入」—— 真实配方不可能不消耗东西，
         // 所以无输入一定是「读不到输入」。只看产出的话，盔甲纹饰锻造会变成
         // 「有产出、无输入、opaque=false」，看起来像「纹饰不需要材料」，那是静默的错误答案。
@@ -209,7 +250,8 @@ public final class RecipeExtractor {
         //   升级配方 → 输入读到了、产出是真的 → 可读
         //   纹饰配方 → 输入读到了、产出被适配器判为读不到 → 仍然 opaque，
         //              reason 会明说是「读不到产出」而不是「输入和产出都读不到」
-        opaque = Readability.isOpaque(inputs, outputs, opaque);
+        int outputCount = outputs.size() + chanceOutputs.size() + fluidOutputs.size();
+        opaque = Readability.isOpaque(inputCount, outputCount, opaque);
 
         // 类型特有的字段：耗时、机器。之前这两个恒为 null —— 通用接口给不出它们，
         // 而没有人去读各配方类自己的字段。症状是产线计算里每个环节都报「手工」。
@@ -227,8 +269,8 @@ public final class RecipeExtractor {
                 typeLabel,
                 List.copyOf(inputs),
                 List.copyOf(outputs),
-                List.of(),   // fluidOutputs：需要流体槽位的配方类型适配器，MVP 先留空
-                List.of(),   // chanceOutputs：概率产出需要按配方类型适配，MVP 先留空
+                List.copyOf(fluidOutputs),
+                List.copyOf(chanceOutputs),
                 machine,
                 duration,
                 null,        // energy：原版确实没有这个数据，只能靠 EMI 或模组适配器。

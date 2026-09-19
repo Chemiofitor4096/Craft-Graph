@@ -336,3 +336,42 @@ MCP 工具的返回值会进模型上下文，所以**输出大小就是成本**
 ### 测试脚本的缓存目录必须隔离
 
 见上面「测量脚本的缓存隔离」。这条是花了代价学到的。
+
+### 软依赖模组的适配器：静态注册会把自己炸掉
+
+`CreateAdapter` 的代码里直接引用 Create 的类（`ProcessingRecipe` 等）。
+最自然的写法是把适配器放进一个静态列表：
+
+```java
+private static final List<RecipeTypeAdapter> ADAPTERS = List.of(
+        new CookingAdapter(), new SmithingAdapter(), new CreateAdapter());   // ❌
+```
+
+**这行会让没装 Create 的实例直接崩。** 加载 `RecipeAdapters` 会连带解析列表里的所有元素，
+于是 JVM 去找 `CreateAdapter` → 它引用 Create 的类 → `NoClassDefFoundError`。
+而且崩的时机是**构建快照时**，也就是整个桥接都不可用 —— 玩家看到的是「装了 CraftGraph 但什么都查不到」。
+
+正确写法是懒建 + 先判断 + `new` 留在 lambda 里：
+
+```java
+private static List<RecipeTypeAdapter> adapters;   // 懒建
+
+if (ModList.get().isLoaded("create")) {
+    try { list.add(() -> new CreateAdapter()); }   // JVM 按指令惰性解析类
+    catch (Throwable t) { LOGGER.warn(...); }       // 类加载失败是 Error，不是 Exception
+}
+```
+
+两个细节都不能省：
+
+- **`new` 必须在 lambda / 分支里。** 直接写 `list.add(new CreateAdapter())` 也不行 ——
+  那条 `new` 指令在方法被调用时就会解析。放进 lambda 才把解析推迟到「装了才执行」。
+- **`catch (Throwable)` 而不是 `Exception`。** `NoClassDefFoundError` 是 `Error`。
+  兜住它，后果就只是「少一个适配器」，而不是「整个快照建不出来」。
+
+实测确认：原版实例（没装 Create）启动后，1290 条配方照常索引，
+日志里 `NoClassDefFoundError` / `ClassNotFoundException` / `CreateAdapter` 出现 0 次。
+
+源码里引用模组 API 用 `compileOnly`（`transitive = false`）。**它的价值是让编译器
+逐条核对我们的调用与真实 API 一致** —— 方法名、参数、返回类型全被检查。
+用反射就完全没有这层保障，连方法名拼错都要等运行时才发现。
