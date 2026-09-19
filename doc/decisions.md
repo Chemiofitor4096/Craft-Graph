@@ -12,24 +12,28 @@
 | 6 | **产线计算用贪心展开，不用线性规划** | 通用解要解方程组 + 引求解器，工期从 1 周变 1 个月。贪心（每种物品固定选一个配方 + 允许覆盖 + 逐层取整）结果可解释，够用。 | 低。求解器可以后加，接口不变。 |
 | 7 | **MVP 不支持多加载器** | 先做 NeoForge。抽象加载器接口是后期的事，现在做纯属浪费。 | 中。但比一开始就抽象要省得多。 |
 
-## 环境现状
+## 环境要求
 
-| 组件 | 版本 | 状态 |
+| 组件 | 要求 | 说明 |
 |---|---|---|
-| Java | 21.0.7 (Microsoft OpenJDK) | ✅ 满足 NeoForge 1.21.1 要求 |
-| Node.js | v24.15.0 / npm 11.12.1 | ✅ |
-| Git | 2.53.0 | ✅ |
-| Gradle | 未装（已生成 wrapper，用缓存里的 9.2.1） | ✅ 已验证 `./gradlew build` 可用 |
-| `JAVA_HOME` | 未设置 | ✅ **不需要**。Gradle 的 toolchain 能从 PATH 找到 JDK 21，已验证 |
-| 代理 | `~/.gradle/gradle.properties` 里配了 `127.0.0.1:7890` | ⚠️ 见下 |
+| Java | 21 | NeoForge 1.21.1 要求 |
+| Node.js | ≥ 20 | MCP Server 侧 |
+| Gradle | **不需要安装** | `mod/gradlew` 已生成，用它即可 |
 
-`~/.gradle` 已有 7.6 GB 缓存，说明本机做过模组开发，首次构建不会从零下载。
+`JAVA_HOME` **不需要设置**：Gradle 的 toolchain 会从 PATH 找到 JDK 21。
+如果 PATH 上的 Java 不是 21，用 `org.gradle.java.installations.paths` 指定，
+或者设 `JAVA_HOME` 指向一个 21 的 JDK。
 
-**关于代理**：用户级 gradle.properties 里配了 `127.0.0.1:7890`（Clash 之类）。
-实测所有构建仓库（Maven Central、NeoForged、Gradle 插件门户、Parchment）**直连和走代理都能通，
-且直连普遍更快**。但首次构建时通过代理拉 `maven.neoforged.net` 出现过一次
-`SSLHandshakeException: Remote host terminated the handshake`，重试即成功 —— 是代理的瞬时故障。
-如果构建偶发失败，先重试再排查，不要急着改配置。
+### 构建偶发失败先重试
+
+如果构建环境走了 HTTP 代理，通过代理拉取 `maven.neoforged.net` 时可能出现：
+
+```
+SSLHandshakeException: Remote host terminated the handshake
+```
+
+实测这通常是**代理节点的瞬时故障** —— 重试即可成功，不要急着改配置。
+该仓库直连与走代理都能通。
 
 ## 与原计划「非目标」的一致性
 

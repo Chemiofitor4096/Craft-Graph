@@ -255,16 +255,16 @@ export K_MAVEN_USERNAME=... K_MAVEN_TOKEN=...    # Git Bash
 
 ### 构建偶发失败先重试
 
-本机 `~/.gradle/gradle.properties` 里配了代理 `127.0.0.1:7890`。实测所有构建仓库
-直连和走代理都能通、且直连更快，但通过代理拉 `maven.neoforged.net` 时出现过一次
+如果构建环境走了 HTTP 代理（`~/.gradle/gradle.properties` 里的 `systemProp.*.proxy*`），
+通过代理拉 `maven.neoforged.net` 时可能出现：
 
 ```
 SSLHandshakeException: Remote host terminated the handshake
 ```
 
-重试即成功 —— 是代理（Clash 之类）把请求路由到了挂掉的节点，属于瞬时故障。
-**先重试再排查，不要急着改配置。** 如果频繁出现，可以在 `~/.gradle/gradle.properties` 里
-临时注释掉那四行 `systemProp.*.proxy*`（实测直连更快更稳）。
+重试即可成功 —— 这通常是代理把请求路由到了挂掉的节点，属于瞬时故障。
+**先重试再排查，不要急着改配置。** 如果频繁出现，可以临时注释掉那几行代理配置
+（实测这类仓库直连也能通）。
 
 ## 已知的坑
 
