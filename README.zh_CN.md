@@ -80,7 +80,7 @@ AI 查的是你**当前实际加载的整合包**的实时配方数据。
 > 暂时从源码构建，大约两分钟。
 
 ```bash
-git clone https://github.com/Chemiofitor4096/craftgraph.git
+git clone https://github.com/Chemiofitor4096/Craft-Graph.git
 cd craftgraph
 
 # 1. 构建 Mod，把 jar 放进 mods 目录
