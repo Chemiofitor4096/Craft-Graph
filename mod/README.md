@@ -17,16 +17,33 @@
 | HTTP 服务（路由、鉴权、分页、错误码） | ✅ | `BridgeHttpServerTest`（20 用例） |
 | 快照生命周期 `bridge/BridgeService` | ✅ | `BridgeServiceTest`（7 用例，含并发读取） |
 | 跨语言契约（Java 输出 → TS 消费） | ✅ | `ContractDumpTest` + `npm run contract`（17 项） |
+| 字段覆盖度审计 `extract/FieldCoverage` | ✅ | `FieldCoverageTest`（12 用例） |
+| 类型→机器对照表 `extract/MachineTable` | ✅ | `MachineTableTest`（9 用例） |
 | 线程派发 `MainThreadDispatcher` | ✅ | 编译通过 |
-| Mod 入口接线 `client/ClientBridge` + `CraftGraph` | 🟡 | 编译通过；**需进游戏验证** |
-| 配方抽取 `extract/RecipeExtractor` | 🟡 | 编译通过；**语义需进游戏验证** |
-| 服务发现 `DiscoveryFile` | 🟡 | 编译通过；需游戏内验证 |
+| Mod 入口接线 `client/ClientBridge` + `CraftGraph` | ✅ | 真游戏跑通（1290 条配方，服务发现零配置） |
+| 配方抽取 `extract/RecipeExtractor` | ✅ | 真游戏跑通；`duration` / `machine` 由 `npm run live` 逐条断言 |
+| 类型特有字段的适配器 `extract/RecipeAdapters` | 🟡 | 耗时靠 `instanceof` 派发，**只能靠 `npm run live` 验证**（见下） |
+| 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
 | EMI 软依赖增强 | ⬜ | 提高 opaque 配方的解析率 |
 
-**测试共 74 个用例，全部不需要启动 Minecraft。**
+**测试共 104 个用例，全部不需要启动 Minecraft。**
+
+### 哪些东西测不了，只能靠进游戏
+
+`RecipeAdapters` 的派发判据是 `instanceof AbstractCookingRecipe`，这需要真实的 MC 类才能验证，
+而测试源码集**看不到 Minecraft**（ModDevGradle 只把它加到主源码集）。
+所以：
+
+| 部分 | 谁来验证 |
+|---|---|
+| 类型→机器对照表、字段覆盖度审计 | JUnit（纯逻辑，不碰 MC） |
+| `instanceof` 派发是否真的匹配那 4 种烹饪配方 | **`npm run live`**，在真游戏上按类型逐条核对 |
+
+这条分工是交过学费的：`duration` 曾经在真数据里全是 `null`，而所有 JUnit 用例全绿。
+**「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 74 用例
+cd mod && ./gradlew test        # Java 侧 104 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -170,7 +187,28 @@ HTTP 请求由 HttpServer 自己的工作线程处理，**不是游戏主线程*
 空 inputs 看起来像"这配方不要原料"，AI 会据此编出错误答案。触发 `opaque` 的典型情况：
 自定义配方格式的模组机器、解析时抛异常、字段结构不认识。
 
-`typeLabel` 和 `machine` 原版拿不到，先给 null；接了 EMI 之后再补。
+`typeLabel` 由 `Humanize.typeLabel` 从类型 id 推出来，不需要 EMI。
+
+**`machine` 和 `duration` 原版给得出，不要留 null。** 这一条是踩过坑才写在这里的：
+代码里曾经写着「原版拿不到，接了 EMI 之后再补」，于是这两个字段在真实数据里
+**1290 条全是 null**，`calculate_production_plan` 的机器数计算整个失效 ——
+而所有单元测试都绿，因为夹具里手写了 duration。实际的原版接口是：
+
+| 字段 | 原版接口 | 覆盖 |
+|---|---|---|
+| `duration` | `AbstractCookingRecipe#getCookingTime()` | 4 种烹饪配方（熔炼 200 / 高炉 100 / 烟熏 100 / 营火 600 刻） |
+| `machine` | `Recipe#getToastSymbol()` 返回的物品 | 通用 |
+
+`getToastSymbol()` 有一个坑：**接口默认实现返回 `minecraft:crafting_table`**，
+所以「没覆写它的模组机器配方」和「真正的工作台合成」返回值一样。
+直接采信会把整合包里每台模组机器都报成工作台 —— 一个看起来很确定的错答案。
+`MachineTable` 因此分两层判断：原版 7 种类型查核实过的表，表外类型只在值不等于默认值时采信。
+
+`energy` 原版**确实没有**这个数据（只有 EMI 或模组适配器拿得到）。
+**不要伪造** —— 编一个能耗数字比 null 危险得多。
+
+新增类型时，在 `RecipeAdapters` 里加一个 `RecipeTypeAdapter` 实现即可。
+判据用「是什么类」而不是「类型 id 白名单」，见该接口的注释。
 
 ### 4. 倒排索引 + `/snapshot` + `/tags/{kind}/all`（1~2 天）
 
@@ -205,7 +243,7 @@ EMI 版本：`1.1.24+1.21.1`（Modrinth 标注 `client_only`，这也是本 Mod 
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 83 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 104 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 
