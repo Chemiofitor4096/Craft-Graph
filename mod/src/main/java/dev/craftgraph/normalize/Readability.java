@@ -41,17 +41,47 @@ public final class Readability {
     private Readability() {
     }
 
+    /** 一条配方的可读性判定结果。 */
+    public enum Outcome {
+        /** 输入产出都读到了。 */
+        READABLE,
+        /**
+         * 输入读到了，产出确实是空的 —— 这条配方**本来就不产出东西**。
+         *
+         * <p>典型是燃料定义（`createaddition:liquid_burning`、`petrochem:*_fuel`）：
+         * 它描述的是「烧掉什么换能量」，没有任何物品产出。
+         * 这和「产出读不到」是两回事 —— 混在一起会让 AI 说错话。
+         */
+        PRODUCES_NOTHING,
+        /** 有东西没能解析出来。 */
+        OPAQUE,
+    }
+
     /**
-     * @param inputCount      成功解析出的输入槽位数量（物品 + 流体）
-     * @param outputCount     成功解析出的产出数量（必然 + 概率 + 流体）
-     * @param slotUnparseable 是否有槽位无法解析（由 {@link IngredientNormalizer} 返回 null 触发）
-     * @return true 表示应当标记为 opaque
+     * 判定一条配方。
+     *
+     * @param inputCount        成功解析出的输入槽位数量（物品 + 流体）
+     * @param outputCount       成功解析出的产出数量（必然 + 概率 + 流体）
+     * @param slotUnparseable   是否有槽位无法解析（由 {@link IngredientNormalizer} 返回 null 触发）
+     * @param declaredNoOutput  适配器**读过这个类型自己的产出字段**之后确认「确实不产出」。
+     *                          见 {@link dev.craftgraph.extract.RecipeTypeAdapter#declaresNoOutput}
      */
+    public static Outcome outcome(int inputCount, int outputCount, boolean slotUnparseable, boolean declaredNoOutput) {
+        if (slotUnparseable) return Outcome.OPAQUE;
+        if (outputCount > 0) {
+            // 有产出但没输入 —— 真实配方不可能不消耗东西，所以那是「读不到输入」
+            return inputCount > 0 ? Outcome.READABLE : Outcome.OPAQUE;
+        }
+        // 产出为空：区分「本来就不产出」和「读不到产出」。
+        // 只有适配器明确作证过才算前者 —— 「读不到」绝不能被降级成「不产出」，
+        // 那会让 AI 把一条读不懂的配方说成「这配方不需要产出」。
+        if (declaredNoOutput) return Outcome.PRODUCES_NOTHING;
+        return Outcome.OPAQUE;
+    }
+
+    /** 只需要「是不是读不懂」时的便捷重载（不产出也算可读）。 */
     public static boolean isOpaque(int inputCount, int outputCount, boolean slotUnparseable) {
-        if (slotUnparseable) return true;
-        if (outputCount == 0) return true;
-        if (inputCount == 0) return true;
-        return false;
+        return outcome(inputCount, outputCount, slotUnparseable, false) == Outcome.OPAQUE;
     }
 
     /**
@@ -65,11 +95,16 @@ public final class Readability {
      * （输入靠访问转换器读到了，产出是组合式的、无法用单一物品表达），
      * 这两句话对 AI 的含义完全不同。
      */
-    public static String reason(int inputCount, int outputCount, boolean slotUnparseable) {
+    public static String reason(int inputCount, int outputCount, boolean slotUnparseable, boolean declaredNoOutput) {
         if (slotUnparseable) return "有槽位无法解析";
-        if (outputCount == 0 && inputCount == 0) return "输入和产出都读不到";
-        if (outputCount == 0) return "读不到产出";
-        if (inputCount == 0) return "读不到输入（配方用谓词而非声明式槽位）";
-        return "";
+        if (outputCount > 0) return inputCount > 0 ? "" : "读不到输入（配方用谓词而非声明式槽位）";
+        if (declaredNoOutput) return "不产出物品（燃料/配置类定义）";
+        if (inputCount == 0) return "输入和产出都读不到";
+        return "读不到产出";
+    }
+
+    /** {@link #reason(int, int, boolean, boolean)} 的便捷重载。 */
+    public static String reason(int inputCount, int outputCount, boolean slotUnparseable) {
+        return reason(inputCount, outputCount, slotUnparseable, false);
     }
 }

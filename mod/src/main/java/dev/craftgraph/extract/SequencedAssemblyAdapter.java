@@ -131,6 +131,13 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
         return out.isEmpty() ? null : out;
     }
 
+    /** 结果池为空 = 这条序列组装确实不产出（同 {@link CreateAdapter#declaresNoOutput}）。 */
+    @Override
+    public boolean declaresNoOutput(Recipe<?> recipe) {
+        if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return false;
+        return normalisePool(assembly).isEmpty();
+    }
+
     @Override
     public Integer duration(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;

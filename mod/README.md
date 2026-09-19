@@ -32,7 +32,7 @@
 | 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
 | 配方查看器集成（JEI 优先） | ⬜ | 只补「只有视图器才知道的东西」，见下 |
 
-**测试共 122 个用例，全部不需要启动 Minecraft。**
+**测试共 127 个用例，全部不需要启动 Minecraft。**
 
 ### 哪些东西测不了，只能靠进游戏
 
@@ -93,7 +93,7 @@
 **「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 122 用例
+cd mod && ./gradlew test        # Java 侧 127 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -319,7 +319,7 @@ EMI 的 API 同样核实过：`EmiRecipe#getInputs()/getOutputs()/getCatalysts()
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 122 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 127 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 

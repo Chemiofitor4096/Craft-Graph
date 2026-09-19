@@ -76,6 +76,44 @@ class ReadabilityTest {
         assertFalse(Readability.isOpaque(1, 1, false));
     }
 
+    // ---------------------------------------------------------------- 不产出 vs 读不到
+
+    @Test
+    @DisplayName("★ 适配器确认「本来就不产出」→ PRODUCES_NOTHING，不是读不懂")
+    void declaredNoOutputIsNotOpaque() {
+        // 燃料定义：输入（1 桶生物燃料）读到了，产出确实是空的。
+        // 说它「读不懂」是错的 —— 我们明明读清楚了。
+        assertEquals(Readability.Outcome.PRODUCES_NOTHING, Readability.outcome(1, 0, false, true));
+    }
+
+    @Test
+    @DisplayName("★ 没有适配器作证时，产出为空仍然是读不懂（不许被降级成「不产出」）")
+    void emptyOutputWithoutDeclarationIsStillOpaque() {
+        // 这条是整件事的关键：把「读不到产出」误判成「本来就不产出」，
+        // 会让 AI 说出「这配方不需要产出」—— 又是一个静默的错误答案。
+        assertEquals(Readability.Outcome.OPAQUE, Readability.outcome(1, 0, false, false));
+        assertEquals(Readability.Outcome.OPAQUE, Readability.outcome(0, 0, false, false));
+    }
+
+    @Test
+    @DisplayName("有产出时，作证与否都不影响判定")
+    void declaredNoOutputIgnoredWhenOutputsExist() {
+        assertEquals(Readability.Outcome.READABLE, Readability.outcome(1, 1, false, true));
+    }
+
+    @Test
+    @DisplayName("槽位解析失败优先于「不产出」")
+    void slotFailureBeatsProducesNothing() {
+        assertEquals(Readability.Outcome.OPAQUE, Readability.outcome(1, 0, true, true));
+    }
+
+    @Test
+    @DisplayName("不产出的原因文案与「读不到产出」不同")
+    void reasonDistinguishesProducesNothing() {
+        assertEquals("不产出物品（燃料/配置类定义）", Readability.reason(1, 0, false, true));
+        assertEquals("读不到产出", Readability.reason(1, 0, false, false));
+    }
+
     // ---------------------------------------------------------------- 原因
 
     @Test

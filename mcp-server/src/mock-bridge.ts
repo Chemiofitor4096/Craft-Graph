@@ -35,6 +35,8 @@ interface FixtureRecipe {
   duration?: number | null;
   energy?: number | null;
   opaque: boolean;
+  /** 本来就不产出物品（燃料/配置类）。见 doc/protocol.md。 */
+  producesNothing?: boolean;
 }
 
 export interface Fixture {

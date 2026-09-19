@@ -147,6 +147,38 @@ try {
     JSON.stringify(single.content).slice(0, 200),
   );
 
+  // ---- 「不产出」不能被说成「读不懂」----
+  //
+  // 两者都让 outputs 为空，但一个是「读清楚了：它不产出」，另一个是「没读懂」。
+  // 混为一谈会让 AI 对玩家说错话，所以这条既查详情页的措辞，也查它没有被标成读不懂。
+  const fuel = await client.callTool({
+    name: "get_recipe_details",
+    arguments: { recipeId: "examplepack:liquid_burning/biofuel" },
+  });
+  const fuelText = (fuel.content as { type: string; text: string }[])[0]?.text ?? "";
+  // 判据是「没有 opaque 警告标记」，不是「不含『读不懂』三个字」——
+  // 后者会被文案里的澄清句（「输入是读到了的，不是读不懂」）误伤。
+  check(
+    "★ 「本来就不产出」在详情页说成「不产出物品」，且没有 opaque 警告",
+    !fuel.isError && fuelText.includes("不产出物品") && !fuelText.includes("⚠️"),
+    fuelText.slice(0, 400),
+  );
+  check(
+    "该配方的输入仍然正常渲染（读到了才敢说不产出）",
+    /输入：[\s\S]*- 1000 mB/.test(fuelText),
+    fuelText.slice(0, 400),
+  );
+  const fuelList = await client.callTool({
+    name: "get_recipes_for_input",
+    arguments: { item: "examplepack:biofuel", kind: "fluid" },
+  });
+  const fuelListText = (fuelList.content as { type: string; text: string }[])[0]?.text ?? "";
+  check(
+    "列表页对它显示「（不产出物品）」而不是「（产出未知）」",
+    fuelListText.includes("不产出物品") && !fuelListText.includes("产出未知"),
+    fuelListText.slice(0, 300),
+  );
+
   // ---- 参数校验 ----
   const badArgs = await client.callTool({
     name: "calculate_production_plan",

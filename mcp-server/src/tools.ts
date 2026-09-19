@@ -106,8 +106,15 @@ function recipeDetail(store: RecipeStore, r: Recipe): string {
 
   lines.push("");
   lines.push("输出：");
-  if (r.outputs.length === 0) lines.push("- （无）");
-  else for (const o of r.outputs) lines.push(`- ${o.count} × ${itemLabel(store, o.item)}`);
+  if (r.producesNothing) {
+    // 「本来就不产出」和「产出读不到」必须分开说 —— 前者是我们读清楚了。
+    // 混为一谈会让 AI 对玩家说「这条我读不懂」，而真相是「它不产出东西」。
+    lines.push("- 这条配方**不产出物品**（燃料/配置类定义；输入是读到了的，不是读不懂）");
+  } else if (r.outputs.length === 0) {
+    lines.push("- （无）");
+  } else {
+    for (const o of r.outputs) lines.push(`- ${o.count} × ${itemLabel(store, o.item)}`);
+  }
 
   for (const o of r.fluidOutputs ?? []) lines.push(`- ${o.amount} mB ${itemLabel(store, o.fluid)}`);
   for (const c of r.chanceOutputs ?? []) {
@@ -130,7 +137,11 @@ function recipeList(store: RecipeStore, recipes: Recipe[], heading: string, tota
   const lines = [`## ${heading}`, "", `共 ${total} 条${shown < total ? `，显示前 ${shown} 条` : ""}`, ""];
   for (const r of recipes) {
     const out = r.outputs[0];
-    const outText = out ? `${out.count} × ${itemLabel(store, out.item)}` : "（产出未知）";
+    const outText = out
+      ? `${out.count} × ${itemLabel(store, out.item)}`
+      : r.producesNothing
+        ? "（不产出物品）"
+        : "（产出未知）";
     lines.push(`- \`${r.id}\` — ${r.typeLabel ?? r.type} → ${outText}${r.opaque ? " ⚠️读不懂" : ""}`);
   }
   // 截断时要把「还有多少、怎么拿」写出来，不能只写「显示前 N 条」。

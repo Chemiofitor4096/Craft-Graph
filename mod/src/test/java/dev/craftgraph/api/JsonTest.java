@@ -49,7 +49,7 @@ class JsonTest {
                 List.of(new Models.Ingredient("item", 1, List.of(Models.Option.tag("forge:ores/iron")))),
                 List.of(Models.ItemStack.of("minecraft:iron_ingot", 1)),
                 List.of(), List.of(),
-                "minecraft:furnace", 200, null, "vanilla", false);
+                "minecraft:furnace", 200, null, "vanilla", false, false);
 
         String json = Json.toJson(recipe);
 

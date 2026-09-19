@@ -251,7 +251,16 @@ public final class RecipeExtractor {
         //   纹饰配方 → 输入读到了、产出被适配器判为读不到 → 仍然 opaque，
         //              reason 会明说是「读不到产出」而不是「输入和产出都读不到」
         int outputCount = outputs.size() + chanceOutputs.size() + fluidOutputs.size();
-        opaque = Readability.isOpaque(inputCount, outputCount, opaque);
+
+        // 「产出为空」有两种原因，必须分开：适配器**读过该类型自己的产出字段**并确认空 =
+        // 这条配方本来就不产出（燃料定义那种）；否则就是「读不到产出」。
+        // 混为一谈会让 AI 把一条读不懂的配方说成「这配方不产出」。
+        RecipeTypeAdapter outputAdapter = RecipeAdapters.forRecipe(recipe);
+        boolean declaredNoOutput = outputAdapter != null && outputAdapter.declaresNoOutput(recipe);
+
+        Readability.Outcome verdict = Readability.outcome(inputCount, outputCount, opaque, declaredNoOutput);
+        opaque = verdict == Readability.Outcome.OPAQUE;
+        boolean producesNothing = verdict == Readability.Outcome.PRODUCES_NOTHING;
 
         // 类型特有的字段：耗时、机器。之前这两个恒为 null —— 通用接口给不出它们，
         // 而没有人去读各配方类自己的字段。症状是产线计算里每个环节都报「手工」。
@@ -276,7 +285,8 @@ public final class RecipeExtractor {
                 null,        // energy：原版确实没有这个数据，只能靠 EMI 或模组适配器。
                              // **不要伪造** —— 编一个能耗数字比 null 危险得多。
                 "vanilla",
-                opaque);
+                opaque,
+                producesNothing);
     }
 
     /**

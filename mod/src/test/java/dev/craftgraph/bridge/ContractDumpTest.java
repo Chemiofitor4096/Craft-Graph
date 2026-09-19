@@ -79,13 +79,13 @@ class ContractDumpTest {
                         List.of(itemIng(1, Models.Option.tag("forge:ores/iron"))),
                         List.of(item("minecraft:iron_ingot", 1)),
                         List.of(), List.of(),
-                        "minecraft:furnace", 200, null, "vanilla", false))
+                        "minecraft:furnace", 200, null, "vanilla", false, false))
                 .addRecipe(new Models.Recipe(
                         "minecraft:iron_block", "minecraft:crafting", "Crafting",
                         List.of(itemIng(9, Models.Option.tag("forge:ingots/iron"))),
                         List.of(item("minecraft:iron_block", 1)),
                         List.of(), List.of(),
-                        "minecraft:crafting_table", null, null, "vanilla", false))
+                        "minecraft:crafting_table", null, null, "vanilla", false, false))
                 // 概率产出：产物只出现在 chanceOutputs 里
                 .addRecipe(new Models.Recipe(
                         "create:crushing/iron_ore", "create:crushing", "Crushing",
@@ -93,7 +93,7 @@ class ContractDumpTest {
                         List.of(item("create:crushed_raw_iron", 1)),
                         List.of(),
                         List.of(new Models.ChanceOutput(item("minecraft:iron_nugget", 1), 0.75)),
-                        "create:crushing_wheel", 100, 4400, "vanilla", false))
+                        "create:crushing_wheel", 100, 4400, "vanilla", false, false))
                 // 流体输入
                 .addRecipe(new Models.Recipe(
                         "examplepack:obsidian_from_fluids", "examplepack:fluid_mixer", "Fluid Mixing",
@@ -102,13 +102,21 @@ class ContractDumpTest {
                                 new Models.Ingredient("fluid", 1000, List.of(Models.Option.fluid("minecraft:lava")))),
                         List.of(item("minecraft:obsidian", 1)),
                         List.of(), List.of(),
-                        "examplepack:mixer", 40, 4000, "vanilla", false))
+                        "examplepack:mixer", 40, 4000, "vanilla", false, false))
                 // 读不懂的配方：inputs 为空但 opaque=true
+                // 「本来就不产出」：燃料定义。producesNothing=true 且 opaque=false ——
+                // 两者都会让 outputs 为空，但含义完全不同（读清楚了 vs 没读懂），
+                // 这个区别必须跨过契约，否则 AI 会把燃料配方说成「读不懂」。
+                .addRecipe(new Models.Recipe(
+                        "examplepack:liquid_burning/biofuel", "examplepack:liquid_burning", "Liquid Burning",
+                        List.of(new Models.Ingredient("fluid", 1000, List.of(Models.Option.fluid("minecraft:water")))),
+                        List.of(), List.of(), List.of(),
+                        "examplepack:liquid_burner", 200, null, "adapter", false, true))
                 .addRecipe(new Models.Recipe(
                         "somemod:alloy_smelting/tungsten_steel", "somemod:alloy_smelting", null,
                         List.of(), List.of(item("somemod:tungsten_steel_ingot", 1)),
                         List.of(), List.of(),
-                        "somemod:alloy_smelter", null, null, "vanilla", true))
+                        "somemod:alloy_smelter", null, null, "vanilla", true, false))
                 .build();
     }
 
@@ -141,6 +149,9 @@ class ContractDumpTest {
 
         // /recipes/{id} —— opaque 配方
         write("recipe-opaque.json", snap.recipe("somemod:alloy_smelting/tungsten_steel"));
+
+        // /recipes/{id} —— 「本来就不产出」的配方（燃料定义）
+        write("recipe-produces-nothing.json", snap.recipe("examplepack:liquid_burning/biofuel"));
 
         // /tags/items/all —— 批量标签，建倒排索引必需
         Map<String, List<String>> allTags = new java.util.LinkedHashMap<>();
@@ -182,6 +193,12 @@ class ContractDumpTest {
         String opaqueJson = Files.readString(OUT_DIR.resolve("recipe-opaque.json"), StandardCharsets.UTF_8);
         assertTrue(opaqueJson.contains("\"opaque\":true"), "opaque 标记必须出现：" + opaqueJson);
         assertTrue(opaqueJson.contains("\"typeLabel\":null"), "typeLabel 为 null 也要出现：" + opaqueJson);
+
+        String fuelJson = Files.readString(OUT_DIR.resolve("recipe-produces-nothing.json"), StandardCharsets.UTF_8);
+        assertTrue(fuelJson.contains("\"producesNothing\":true"),
+                "「本来就不产出」必须跨过契约（AI 靠它区分「不产出」和「读不懂」）：" + fuelJson);
+        assertTrue(fuelJson.contains("\"opaque\":false"),
+                "不产出的配方不是读不懂 —— opaque 必须是 false：" + fuelJson);
 
         String tagJson = Files.readString(OUT_DIR.resolve("tags-items-all.json"), StandardCharsets.UTF_8);
         assertTrue(tagJson.contains("\"forge:ingots/iron\""), tagJson);

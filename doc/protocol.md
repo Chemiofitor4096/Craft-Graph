@@ -129,7 +129,8 @@ Mod 启动后把实际监听的地址和 token 写到**两个**位置：
   "duration": 200,                   // 游戏刻(ticks)，20 tick = 1 秒；未知为 null
   "energy": null,                    // 消耗能量(FE)；未知为 null
   "source": "vanilla",               // "vanilla" | "emi" | "adapter"
-  "opaque": false                    // 见下方说明
+  "opaque": false,                   // 见下方说明
+  "producesNothing": false           // 本来就不产出物品（燃料/配置类）。见下方说明
 }
 ```
 
@@ -144,6 +145,30 @@ Mod 启动后把实际监听的地址和 token 写到**两个**位置：
 **为什么必须显式标记而不是返回空 `inputs`**：空 `inputs` 看起来像"这配方不要原料"，
 AI 会据此得出错误结论并且不自知。标记成 `opaque` 后，MCP Server 会告诉 AI
 "这条配方我读不懂"，AI 就能诚实地说不知道，而不是编一个假答案。
+
+#### `producesNothing` 字段：区分「不产出」和「读不到」
+
+`producesNothing: true` 表示**这条配方本来就不产出物品**，而不是「产出读不到」。
+
+两者都会让 `outputs` 为空，含义却相反：
+
+| 情况 | `opaque` | `producesNothing` | AI 该说的话 |
+|---|---|---|---|
+| 正常 | false | false | 正常回答 |
+| 产出读不到（模组自定义格式） | **true** | false | 「这条配方我读不懂」 |
+| 本来就不产出（燃料定义、刷怪配置） | **false** | **true** | 「这条配方不产出物品」 |
+
+**为什么必须分开**：燃料配方（`createaddition:liquid_burning`、`petrochem:*_fuel`）描述的是
+"烧掉什么换能量"，输入完全读得到、产出确实是空的。把它标成 `opaque` 会让 AI 说
+"这条我读不懂" —— 而我们明明读清楚了。反过来，把读不懂的配方说成"不产出"更糟：
+那等于告诉 AI 这个配方不需要产出，又是一个静默的错误答案。
+
+**谁来作证**：只有**读过该配方类型自己的产出字段**的适配器才能声明这一点
+（Mod 侧的 `RecipeTypeAdapter#declaresNoOutput`）。没有适配器作证的「产出为空」
+一律按 `opaque` 处理 —— 宁可说"读不懂"，也不能把未读到的产出说成"不存在"。
+
+**约定**：为 true 时保证 `opaque === false` 且 `outputs` 为空。
+旧版 Mod 不发这个字段，调用方按 false 处理（它是可选字段，不是破坏性变更）。
 
 **`source` 字段**告诉你这条数据是谁归一化的：
 

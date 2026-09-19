@@ -53,7 +53,7 @@ try {
   const store = await RecipeStore.load(client);
   const status = store.status;
 
-  check("缓存加载成功", status.recipeCount === 14, `recipeCount=${status.recipeCount}（期望 14）`);
+  check("缓存加载成功", status.recipeCount === 15, `recipeCount=${status.recipeCount}（期望 15）`);
   check("标签加载成功", status.tagCount === 5, `tagCount=${status.tagCount}（期望 5）`);
   check("在线状态标记正确", status.offline === false, `offline=${status.offline}`);
 
@@ -488,7 +488,7 @@ try {
   const offlineStore = await RecipeStore.load(client);
   check(
     "游戏关掉后能退到磁盘快照",
-    offlineStore.status.offline === true && offlineStore.status.recipeCount === 14,
+    offlineStore.status.offline === true && offlineStore.status.recipeCount === 15,
     `offline=${offlineStore.status.offline} recipeCount=${offlineStore.status.recipeCount}`,
   );
 

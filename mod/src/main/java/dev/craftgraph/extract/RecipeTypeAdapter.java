@@ -118,6 +118,33 @@ public interface RecipeTypeAdapter {
     }
 
     /**
+     * 这条配方**本来就不产出东西**（而不是「产出读不到」）。
+     *
+     * <h2>为什么需要单独一个判断</h2>
+     *
+     * 「产出为空」有两种完全不同的原因，混在一起会让 AI 说错话：
+     *
+     * <ul>
+     *   <li><b>读不到</b> —— 产出藏在没解析的字段里。这时该说「我读不懂」。</li>
+     *   <li><b>本来就不产出</b> —— 燃料定义（`createaddition:liquid_burning`、
+     *       `petrochem:*_fuel`）这类配方描述的是「烧掉什么换能量」，它没有任何物品产出。
+     *       这时说「我读不懂」是**错的** —— 我们明明读到了它的输入。</li>
+     * </ul>
+     *
+     * 实测数据（All of Create）：`petrochem:diesel_engine_fuel` 的耗时读到了
+     * （说明它确实是 {@code ProcessingRecipe}），输入 1 个槽位读到了，产出确实是空的。
+     * 这一类共约 17 条，原先全被标成「读不到产出」。
+     *
+     * <p><b>只有真的读了这个类型自己的产出字段之后才能返回 true</b> ——
+     * 判据是「我读了它的产出字段，确实是空的」，不是「我没读到产出」。
+     * 返回 true 时上层会把它标成「不产出」而不是「读不懂」，所以这是一个**断言**，
+     * 要能对得起它。
+     */
+    default boolean declaresNoOutput(Recipe<?> recipe) {
+        return false;
+    }
+
+    /**
      * 一个概率产出。
      *
      * @param stack  产出的物品

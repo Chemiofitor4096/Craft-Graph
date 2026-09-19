@@ -34,7 +34,7 @@ class RecipeSnapshotTest {
     private static Models.Recipe recipe(String id, String type,
                                         List<Models.Ingredient> inputs,
                                         List<Models.ItemStack> outputs) {
-        return new Models.Recipe(id, type, null, inputs, outputs, List.of(), List.of(), null, null, null, "vanilla", false);
+        return new Models.Recipe(id, type, null, inputs, outputs, List.of(), List.of(), null, null, null, "vanilla", false, false);
     }
 
     /**
@@ -67,12 +67,12 @@ class RecipeSnapshotTest {
                 List.of(item("create:crushed_iron", 1)),
                 List.of(),
                 List.of(new Models.ChanceOutput(item("minecraft:iron_nugget", 1), 0.75)),
-                "create:crushing_wheel", 100, null, "vanilla", false);
+                "create:crushing_wheel", 100, null, "vanilla", false, false);
 
         // 读不懂的配方：inputs 是空的，但必须仍然能被查到，否则上层会以为这物品凭空来的
         Models.Recipe opaque = new Models.Recipe("somemod:alloy", "somemod:alloy_smelting", null,
                 List.of(), List.of(item("somemod:tungsten_steel", 1)),
-                List.of(), List.of(), "somemod:smelter", null, null, "vanilla", true);
+                List.of(), List.of(), "somemod:smelter", null, null, "vanilla", true, false);
 
         // 同一个槽位里两个选项都指向同一物品 —— 索引里不能出现两条重复
         Models.Recipe dupOptions = recipe("test:dup_options", "minecraft:crafting",
@@ -172,7 +172,7 @@ class RecipeSnapshotTest {
                 List.of(new Models.Ingredient("fluid", 1000,
                         List.of(Models.Option.fluid("test:water")))),
                 List.of(item("test:output", 1)),
-                List.of(), List.of(), null, 20, null, "vanilla", false);
+                List.of(), List.of(), null, 20, null, "vanilla", false, false);
 
         RecipeSnapshot s = RecipeSnapshot.builder(1).addRecipe(fluidRecipe).build();
 

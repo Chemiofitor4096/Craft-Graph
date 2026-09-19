@@ -31,7 +31,7 @@ class BridgeServiceTest {
         return new Models.Recipe(id, "minecraft:crafting", null,
                 List.of(new Models.Ingredient("item", 1, List.of(Models.Option.item("minecraft:iron_ingot")))),
                 List.of(new Models.ItemStack("minecraft:iron_block", 1, null)),
-                List.of(), List.of(), null, null, null, "vanilla", false);
+                List.of(), List.of(), null, null, null, "vanilla", false, false);
     }
 
     private static BridgeService newService() {

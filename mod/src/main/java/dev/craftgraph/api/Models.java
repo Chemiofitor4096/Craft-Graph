@@ -70,6 +70,10 @@ public final class Models {
      * @param opaque true 表示输入/输出没能被正确解析。
      *               <b>必须显式标记，不能返回空 inputs 了事</b> ——
      *               空 inputs 看起来像"这配方不要原料"，AI 会据此得出错误结论且不自知。
+     * @param producesNothing true 表示**这条配方本来就不产出物品**（燃料/配置类定义），
+     *               而不是"产出读不到"。两者都会让 outputs 为空，但含义完全不同：
+     *               前者是我们读清楚了，后者是我们没读懂。
+     *               约定：它为 true 时 {@code opaque} 必须是 false、{@code outputs} 必须是空。
      * @param source 谁归一化的："vanilla" | "emi" | "adapter"
      */
     public record Recipe(
@@ -84,7 +88,8 @@ public final class Models {
             Integer duration,
             Integer energy,
             String source,
-            boolean opaque) {
+            boolean opaque,
+            boolean producesNothing) {
     }
 
     /** 列表接口用的摘要，不含完整 inputs（省流量）。 */

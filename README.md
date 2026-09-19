@@ -200,6 +200,14 @@ flagged `opaque`: 18 armour trims and 13 code-driven special recipes (dyeing, ma
 fireworks, banner duplication). Run `npm run inspect` to see the breakdown by recipe type for
 your own pack.
 
+There is a third case worth knowing about: some recipe types **produce nothing at all** — fuel
+definitions such as `createaddition:liquid_burning` or `petrochem:*_fuel` read as "burn this,
+get energy". Their inputs are read fine and their output really is empty, so labelling them
+`opaque` would make the AI say "I cannot read this" when the truth is "this produces nothing".
+They carry `producesNothing: true` instead. Only an adapter that has actually read that recipe
+type's own output fields is allowed to claim this — a recipe whose output merely *could not be
+read* stays `opaque`.
+
 The 13 code-driven specials cannot be fixed by anyone: their logic lives in Java, they declare
 no ingredients, and recipe viewers special-case them for display rather than reading them.
 `opaque` is the honest answer here, and the AI is told to say "I cannot read this" instead of

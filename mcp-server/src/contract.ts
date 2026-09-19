@@ -110,11 +110,17 @@ try {
   }
 
   const status = store.status;
+  // 真正的一致性检查：索引里的条数与 status 报的一致。
+  // 不依赖常量，所以样本增删时不会假红 —— 而「两侧对同一条数据得出一致的结论」
+  // 本来就是这一层要验的东西。
   check(
-    "配方数量与 Java 侧一致（health.recipeCount = 5）",
-    status.recipeCount === 5,
-    `实际 ${status.recipeCount}`,
+    "索引条数与 status 报的数量一致",
+    store.allRecipes().length === status.recipeCount,
+    `索引 ${store.allRecipes().length}，status ${status.recipeCount}`,
   );
+  // 这个常量只是样本锚点（改样本要跟着改），不是契约检查 ——
+  // 它保证「样本被意外改空/改少」也会被发现。
+  check("样本条数符合预期（6）", status.recipeCount === 6, `实际 ${status.recipeCount}`);
   check("标签数量解析正确（4 个）", status.tagCount === 4, `实际 ${status.tagCount}`);
   check("dataVersion 被正确读取（42）", status.dataVersion === 42, `实际 ${status.dataVersion}`);
   check("未误判为离线", !status.offline);
@@ -149,6 +155,17 @@ try {
     "opaque 配方解析正确且标记保留",
     opaque.length === 1 && opaque[0]!.opaque === true,
     JSON.stringify(opaque.map((r) => ({ id: r.id, opaque: r.opaque }))),
+  );
+
+  // 「本来就不产出」必须跨过契约，而且**不能**被当成读不懂 ——
+  // 两者都会让 outputs 为空，含义却相反（读清楚了 vs 没读懂）。
+  // 这条配方是燃料定义（有流体输入、无产出），从输入索引里找它。
+  const fuel = store.recipesConsuming("fluid", "minecraft:water").filter((r) => r.id.includes("liquid_burning"));
+  check(
+    "「不产出物品」标记跨过契约，且不被当成读不懂",
+    fuel.length === 1 && fuel[0]!.producesNothing === true && fuel[0]!.opaque === false &&
+      fuel[0]!.outputs.length === 0 && fuel[0]!.inputs.length === 1,
+    JSON.stringify(fuel.map((r) => ({ id: r.id, producesNothing: r.producesNothing, opaque: r.opaque, out: r.outputs.length }))),
   );
 
   const obsidian = store.recipesProducing("item", "minecraft:obsidian");

@@ -98,7 +98,7 @@ class BridgeHttpServerTest {
     }
 
     private static Models.Recipe recipe(String id, String type, List<Models.Ingredient> inputs, List<Models.ItemStack> outputs) {
-        return new Models.Recipe(id, type, null, inputs, outputs, List.of(), List.of(), null, 200, null, "vanilla", false);
+        return new Models.Recipe(id, type, null, inputs, outputs, List.of(), List.of(), null, 200, null, "vanilla", false, false);
     }
 
     private static RecipeSnapshot readySnapshot() {

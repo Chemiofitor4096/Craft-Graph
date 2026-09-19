@@ -110,6 +110,22 @@ final class CreateAdapter implements RecipeTypeAdapter {
         return out.isEmpty() ? null : out;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>{@code ProcessingRecipe} 的产出只有两个来源：{@code results}（物品）与
+     * {@code fluidResults}（流体）。两个都空 = 这条配方确实不产出 —— 燃料定义就是这样
+     * （实测 {@code petrochem:*_fuel} 的耗时和输入都读到了，产出确实是空的）。
+     *
+     * <p>这个断言建立在「产出字段就是这两处」这个类契约上。一个在这之外产出东西的子类
+     * 会被误判 —— 但那种子类违反它父类的数据模型。
+     */
+    @Override
+    public boolean declaresNoOutput(Recipe<?> recipe) {
+        if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return false;
+        return processing.getRollableResults().isEmpty() && processing.getFluidResults().isEmpty();
+    }
+
     @Override
     public List<FluidStack> fluidResults(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;

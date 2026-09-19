@@ -299,6 +299,23 @@
       "energy": null,
       "source": "adapter",
       "opaque": false
+    },
+
+    {
+      "_note": "燃料定义：输入读到了、产出确实是空的 —— producesNothing=true 且 opaque=false。用来测「不产出」不会被说成「读不懂」。",
+      "id": "examplepack:liquid_burning/biofuel",
+      "type": "examplepack:liquid_burning",
+      "typeLabel": "Liquid Burning",
+      "inputs": [{ "kind": "fluid", "count": 1000, "options": [{ "type": "fluid", "id": "examplepack:biofuel" }] }],
+      "outputs": [],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "examplepack:liquid_burner",
+      "duration": 200,
+      "energy": null,
+      "source": "adapter",
+      "opaque": false,
+      "producesNothing": true
     }
   ]
 }
