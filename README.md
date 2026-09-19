@@ -82,7 +82,7 @@ Handled deliberately, because they are where naive tools produce wrong answers:
 > For now, build both from source — it takes about two minutes.
 
 ```bash
-git clone https://github.com/Chemiofitor4096/craftgraph.git
+git clone https://github.com/Chemiofitor4096/Craft-Graph.git
 cd craftgraph
 
 # 1. Build the mod and put the jar in your mods folder
