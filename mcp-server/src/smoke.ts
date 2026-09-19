@@ -26,6 +26,7 @@ const { buildRecipeTree, flattenTree, pruneTree, subtreeStats } = await import("
 const { pickCanonical } = await import("./resolution.js");
 const { calculatePlan, prunePlan } = await import("./plan.js");
 const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv } = await import("./report.js");
+const { opaqueHint } = await import("./opaque.js");
 
 const PORT = 25599;
 const results: { name: string; ok: boolean; detail: string }[] = [];
@@ -51,7 +52,7 @@ try {
   const store = await RecipeStore.load(client);
   const status = store.status;
 
-  check("缓存加载成功", status.recipeCount === 11, `recipeCount=${status.recipeCount}（期望 11）`);
+  check("缓存加载成功", status.recipeCount === 12, `recipeCount=${status.recipeCount}（期望 12）`);
   check("标签加载成功", status.tagCount === 5, `tagCount=${status.tagCount}（期望 5）`);
   check("在线状态标记正确", status.offline === false, `offline=${status.offline}`);
 
@@ -224,6 +225,75 @@ try {
     tsvPlan.includes("# 机器") && tsvPlan.includes("# 每分钟原料") && tsvPlan.includes("# 能耗"),
   );
 
+  // ---- 「耗时未知」的归因不能糊成一句（在 Create 整合包上实测过这个误导）----
+  //
+  // 原来产线头部只写「有 N 个环节耗时未知（通常是工作台合成）」，而同一条输出下面
+  // 可能写着「用 create:filling 制作」—— 填充机是机器不是工作台。
+  // 把「我们读不到」说成「原版就这样」会让玩家照着建错产线，也会让模型以为不用配比。
+  const workbenchPlan = renderPlan(
+    store,
+    calculatePlan(store, "item", "minecraft:torch", { ratePerMinute: 60 }),
+    "test",
+    2,
+  );
+  check(
+    "工作台合成的环节仍报「手工」，且说明原因是原版没有耗时字段",
+    workbenchPlan.includes("工作台合成") && workbenchPlan.includes("原版设计如此"),
+    workbenchPlan.split("\n").slice(0, 12).join(" / "),
+  );
+  check(
+    "★ 不再把所有「耗时未知」都说成「工作台合成」",
+    !workbenchPlan.includes("通常是工作台合成") && !workbenchPlan.includes("多为工作台合成"),
+    workbenchPlan.split("\n").slice(0, 12).join(" / "),
+  );
+
+  // 模组机器配方没有耗时（夹具里的 examplepack:widget_pressing）：必须说成「读不到数据」，
+  // 而且要带上覆盖度，这样模型不必为了这句话专门再去调 get_bridge_status。
+  const machinePlan = renderPlan(
+    store,
+    calculatePlan(store, "item", "examplepack:widget", { ratePerMinute: 60 }),
+    "test",
+    2,
+  );
+  check(
+    "★ 机器加工但读不到耗时时，说成「读不到数据」而不是「手工合成」",
+    machinePlan.includes("机器加工") && machinePlan.includes("读不到耗时"),
+    machinePlan.split("\n").slice(0, 12).join(" / "),
+  );
+  check(
+    "该场景下产线自带覆盖度说明（省掉一次 get_bridge_status）",
+    /耗时只覆盖 \d+\/\d+ 条/.test(machinePlan),
+    machinePlan.split("\n").slice(0, 14).join(" / "),
+  );
+
+  // ---- 读不懂的提示文案 ----
+  //
+  // 原来写「装 EMI 或加适配层后可以读到」：方案已改成 JEI 优先、而且「适配层」是内部概念。
+  // 更要紧的是它没区分「模组格式我们没覆盖」（值得写适配器）和「原版代码驱动」（谁都读不到）。
+  const moddedHint = opaqueHint(["create:mixing"]);
+  check(
+    "读不懂的提示对模组类型说的是「还没覆盖，可以写适配器」",
+    moddedHint.includes("create:mixing") && moddedHint.includes("适配器") && !moddedHint.includes("EMI"),
+    moddedHint,
+  );
+  const vanillaHint = opaqueHint(["minecraft:crafting"]);
+  check(
+    "对原版代码驱动的类型说明是平台限制（不说成我们的缺口）",
+    vanillaHint.includes("代码驱动") && !vanillaHint.includes("适配器"),
+    vanillaHint,
+  );
+  check(
+    "两种原因混在一起时两句话都要有",
+    opaqueHint(["create:mixing", "minecraft:crafting"]).includes("适配器") &&
+      opaqueHint(["create:mixing", "minecraft:crafting"]).includes("代码驱动"),
+    opaqueHint(["create:mixing", "minecraft:crafting"]),
+  );
+  check(
+    "提示里都给出可执行的下一步（用 JEI 核对）",
+    opaqueHint(["create:mixing"]).includes("JEI"),
+    opaqueHint(["create:mixing"]),
+  );
+
   // ---- 产线裁剪 ----
   const planFullForPrune = calculatePlan(store, "item", "minecraft:iron_ingot", { ratePerMinute: 10 });
   const planPruned = { ...planFullForPrune, root: prunePlan(planFullForPrune.root, 0) };
@@ -350,7 +420,7 @@ try {
   const offlineStore = await RecipeStore.load(client);
   check(
     "游戏关掉后能退到磁盘快照",
-    offlineStore.status.offline === true && offlineStore.status.recipeCount === 11,
+    offlineStore.status.offline === true && offlineStore.status.recipeCount === 12,
     `offline=${offlineStore.status.offline} recipeCount=${offlineStore.status.recipeCount}`,
   );
 

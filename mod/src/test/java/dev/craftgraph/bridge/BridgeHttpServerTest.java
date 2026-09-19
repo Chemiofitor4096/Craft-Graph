@@ -363,7 +363,8 @@ class BridgeHttpServerTest {
             new BridgeConfig(80, false);
             org.junit.jupiter.api.Assertions.fail("1024 以下是特权端口，应该被拒绝");
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("端口"), expected.getMessage());
+            // 消息本身必须是 ASCII（日志编码，见 LogEncodingTest），所以这里断言英文关键词
+            assertTrue(expected.getMessage().contains("Port"), expected.getMessage());
         }
         try {
             new BridgeConfig(70000, false);

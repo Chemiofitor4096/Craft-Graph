@@ -62,7 +62,7 @@ export interface Recipe {
   id: string;
   /** 配方类型 id，如 "minecraft:smelting" */
   type: string;
-  /** 给人看的类型名，装了 EMI/JEI 时更准 */
+  /** 给人看的类型名。由 Mod 侧从类型 id 推出来（Humanize），不依赖任何视图器 */
   typeLabel?: string | null;
 
   inputs: Ingredient[];

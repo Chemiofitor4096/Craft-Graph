@@ -17,6 +17,7 @@
  * 取舍规则（选哪条配方、标签挑哪个成员）在 resolution.ts，与产线计算共用。
  */
 
+import { opaqueHint } from "./opaque.js";
 import { type RecipeStore, type StackKind } from "./cache.js";
 import { ResolutionEngine, normalizeOptions, type ExpansionOptions } from "./resolution.js";
 export type NodeKind =
@@ -175,7 +176,7 @@ class TreeWalker extends ResolutionEngine {
       const types = [...new Set(candidates.map((r) => r.type))].join(", ");
       node.note =
         `有 ${candidates.length} 条配方能产出它，但都读不懂输入输出（配方类型：${types}）。` +
-        `装 EMI 或加适配层后可以读到。`;
+        opaqueHint(candidates.map((r) => r.type));
       this.warnings.push(`${id} 的配方读不懂（类型：${types}），无法继续展开`);
       return node;
     }

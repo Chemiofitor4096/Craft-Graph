@@ -80,11 +80,12 @@ public final class RecipeAdapters {
         try {
             RecipeTypeAdapter adapter = factory.get();
             list.add(adapter);
-            LOGGER.debug("CraftGraph 已启用 {} 的配方适配器", displayName);
+            LOGGER.debug("CraftGraph enabled the {} recipe adapter", displayName);
         } catch (Throwable t) {
             // 用 Throwable 而不是 Exception：类加载失败是 Error。
             // 后果限定为「少一个适配器」，而不是整个快照建不出来。
-            LOGGER.warn("CraftGraph 加载 {} 的配方适配器失败，将退回通用读取（该类配方的产出可能不完整）：{}",
+            LOGGER.warn("CraftGraph failed to load the {} recipe adapter; "
+                    + "falling back to generic reading (its recipes may report incomplete outputs): {}",
                     displayName, t.toString());
         }
     }

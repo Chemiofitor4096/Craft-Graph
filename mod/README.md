@@ -28,10 +28,11 @@
 | Create 序列组装适配器 `extract/SequencedAssemblyAdapter` | 🟡 | 同上；`loops` 与权重池语义读 Create 源码确认，不是猜的 |
 | 产出概率分类 `extract/ResultChance` | ✅ | `ResultChanceTest`（11 用例，含 NaN / >1 / 权重归一化边界） |
 | 访问转换器文件守卫 `AccessTransformerTest` | ✅ | 3 用例（钉住 AT 与适配器的配套关系） |
+| 日志编码守卫 `LogEncodingTest` | ✅ | 扫描所有 `LOGGER.*` 语句断言 ASCII（跨行拼接也算） |
 | 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
 | 配方查看器集成（JEI 优先） | ⬜ | 只补「只有视图器才知道的东西」，见下 |
 
-**测试共 121 个用例，全部不需要启动 Minecraft。**
+**测试共 122 个用例，全部不需要启动 Minecraft。**
 
 ### 哪些东西测不了，只能靠进游戏
 
@@ -69,11 +70,30 @@
 没有它就只能靠反射，那样连拼写错误都发现不了。
 （关掉传递依赖是因为 Create 的实现依赖散落在别的仓库，而它们对「签名对不对」毫无帮助。）
 
+### ⚠️ 日志文案必须写英文，注释写中文
+
+在中文 Windows 上 Minecraft 把日志按 **GBK** 写出去，而整份日志里**只有我们这几行含中文**，
+于是任何 UTF-8 查看器里只有 CraftGraph 的行是乱码（用户实测报过这个）。
+**一份读不出来的日志等于没有日志** —— 排查性能与覆盖度全靠那几行。
+
+| 内容 | 语言 |
+|---|---|
+| `LOGGER.*` 文案 | **ASCII 英文** |
+| 代码注释 / javadoc | 中文 |
+| HTTP 错误消息（`error(...)`） | 中文 —— 走 JSON 且声明 `charset=utf-8`，是给 AI 读的，没有编码问题 |
+
+`LogEncodingTest` 钉住这条：扫描所有 `LOGGER.*` 语句（含跨行拼接）断言 ASCII，
+并先断言至少扫到 15 条 —— 否则「一条都没扫到」也会全绿。
+
+（踩坑：改这些文案后 `npm run contract` 会报样本过期。原因是 Gradle 构建缓存命中了
+`test` 任务 —— 它 731ms 就「成功」了，实际没执行，`ContractDumpTest` 也就没重写样本。
+强制真跑用 `./gradlew test --rerun-tasks --no-build-cache`。）
+
 这条分工是交过学费的：`duration` 曾经在真数据里全是 `null`，而所有 JUnit 用例全绿。
 **「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 121 用例
+cd mod && ./gradlew test        # Java 侧 122 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -299,7 +319,7 @@ EMI 的 API 同样核实过：`EmiRecipe#getInputs()/getOutputs()/getCatalysts()
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 121 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 122 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 

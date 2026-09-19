@@ -238,6 +238,22 @@
       "energy": null,
       "source": "vanilla",
       "opaque": true
+    },
+
+    {
+      "_note": "模组机器配方但没有耗时，且输入输出都读得到。用来测产线头部会不会把它误说成「工作台合成」。",
+      "id": "examplepack:widget_pressing",
+      "type": "examplepack:pressing",
+      "typeLabel": "Pressing",
+      "inputs": [{ "kind": "item", "count": 1, "options": [{ "type": "item", "id": "examplepack:raw_widget" }] }],
+      "outputs": [{ "item": "examplepack:widget", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "examplepack:press",
+      "duration": null,
+      "energy": null,
+      "source": "adapter",
+      "opaque": false
     }
   ]
 }

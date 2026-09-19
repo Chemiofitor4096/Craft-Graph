@@ -28,8 +28,8 @@ public record BridgeConfig(
         // 允许 0：让操作系统分配临时端口。测试要用，正常使用不会填 0
         // （填 0 的话端口每次都不一样，MCP Server 就找不到了）。
         if (port != 0 && (port < 1024 || port > 65535)) {
-            throw new IllegalArgumentException("端口必须是 0（临时端口，仅测试用）或 1024~65535，实际 " + port
-                    + "（1024 以下是特权端口，65535 以上无效）");
+            throw new IllegalArgumentException("Port must be 0 (ephemeral, tests only) or 1024-65535, got " + port
+                    + " (below 1024 is privileged, above 65535 is invalid)");
         }
     }
 }

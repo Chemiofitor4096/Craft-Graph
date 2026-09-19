@@ -114,12 +114,53 @@ try {
     JSON.stringify(missing.content).slice(0, 300),
   );
 
+  // ---- 批量详情：省往返 ----
+  //
+  // 在大包里实测过这个痛点：模型先 get_recipes_for_output 拿列表，再对每条逐次调
+  // get_recipe_details —— 12 条配方就是 13 次往返。批量入参是为了把它压成一次。
+  // 这两个 id 取自 mock bridge 的固定配方（见 mock-bridge.ts）。
+  const ids = ["examplepack:iron_ingot_from_crushed_iron", "create:crushing/iron_ore"];
+  const batch = await client.callTool({ name: "get_recipe_details", arguments: { recipeIds: ids } });
+  const batchText = (batch.content as { type: string; text: string }[])[0]?.text ?? "";
+  check(
+    `recipeIds 一次拿到 ${ids.length} 条详情`,
+    !batch.isError && ids.every((id) => batchText.includes(id)),
+    `请求 ${ids.join(", ")}\n${batchText.slice(0, 300)}`,
+  );
+  // 混一个不存在的 id：其余几条必须照常返回，并说明跳过了哪条
+  const mixed = await client.callTool({
+    name: "get_recipe_details",
+    arguments: { recipeIds: [...ids.slice(0, 2), "does:not_exist"] },
+  });
+  const mixedText = (mixed.content as { type: string; text: string }[])[0]?.text ?? "";
+  check(
+    "批量详情里部分找不到时不整批失败，而是跳过并说明",
+    !mixed.isError && mixedText.includes(ids[0]!) && mixedText.includes("找不到"),
+    mixedText.slice(0, 300),
+  );
+
+  // ---- 单条入参仍然可用（兼容模型已习惯的调用方式）----
+  const single = await client.callTool({ name: "get_recipe_details", arguments: { recipeId: ids[0]! } });
+  check(
+    "recipeId 单条入参仍然可用",
+    !single.isError && JSON.stringify(single.content).includes(ids[0]!),
+    JSON.stringify(single.content).slice(0, 200),
+  );
+
   // ---- 参数校验 ----
   const badArgs = await client.callTool({
     name: "calculate_production_plan",
     arguments: { item: "minecraft:iron_ingot", ratePerMinute: -5 },
   });
   check("非法参数被 schema 拦下", badArgs.isError === true, JSON.stringify(badArgs.content).slice(0, 200));
+
+  // 两个 id 参数都不给时要说清楚要什么，而不是抛异常
+  const noId = await client.callTool({ name: "get_recipe_details", arguments: {} });
+  check(
+    "既不给 recipeId 也不给 recipeIds 时返回可读提示",
+    noId.isError === true && JSON.stringify(noId.content).includes("recipeId"),
+    JSON.stringify(noId.content).slice(0, 200),
+  );
 } catch (err) {
   check("端到端流程未抛异常", false, err instanceof Error ? `${err.message}\n${err.stack}` : String(err));
 } finally {

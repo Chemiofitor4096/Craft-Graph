@@ -107,11 +107,12 @@ public final class ClientBridge {
             // 日志里打**实际绑定的地址**，不是配置里的值。
             // 「配置写 25585 所以日志也说 25585」这种自说自话会掩盖绑错地址的情况。
             InetSocketAddress bound = bridge.server.boundAddress();
-            LOGGER.info("CraftGraph bridge 已启动：{}（等待进入世界后加载配方）", bound);
+            LOGGER.info("CraftGraph bridge started on {} (recipes load once you enter a world)", bound);
 
             selfCheck(bound);
         } catch (IOException e) {
-            LOGGER.error("CraftGraph bridge 启动失败（端口 {} 可能被占用）：{}", config.port(), e.getMessage());
+            LOGGER.error("CraftGraph bridge failed to start (port {} may be in use): {}",
+                    config.port(), e.getMessage());
             bridge.shutdown();
             return null;
         }
@@ -159,12 +160,14 @@ public final class ClientBridge {
                         .GET()
                         .build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                LOGGER.info("CraftGraph 自检通过：本机 http://127.0.0.1:{} 可访问（HTTP {}）。"
-                                + "若外部 curl 仍连不上，问题不在服务本身，而在防火墙。",
+                LOGGER.info("CraftGraph self-check OK: http://127.0.0.1:{} reachable from this machine (HTTP {})."
+                                + " If an external curl still cannot connect, the problem is the "
+                                + "firewall, not the service.",
                         bound.getPort(), response.statusCode());
             } catch (Throwable e) {
-                LOGGER.error("CraftGraph 自检失败：服务已绑定到 {}，但从本机连不上。"
-                                + "问题在服务侧而不是环境 —— 检查绑定地址是否为 127.0.0.1（IPv4）。", bound, e);
+                LOGGER.error("CraftGraph self-check FAILED: bound to {} but unreachable from this machine."
+                                + " That points at the service, not the environment -- check the bind "
+                                + "address is 127.0.0.1 (IPv4).", bound, e);
             }
         }, "craftgraph-selfcheck");
         t.setDaemon(true);
@@ -186,7 +189,7 @@ public final class ClientBridge {
      */
     private void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         if (service.isReady()) {
-            LOGGER.info("CraftGraph 断开连接，清空配方快照");
+            LOGGER.info("CraftGraph disconnected; recipe snapshot cleared");
             service.clear();
         }
     }
@@ -201,7 +204,7 @@ public final class ClientBridge {
         if (rebuildInFlight) {
             // 上一次还在建 —— 直接跳过。配方重载事件可能连续触发多次，
             // 排队等没意义（每次都会覆盖前一次的结果），而且会堆积主线程任务。
-            LOGGER.debug("CraftGraph 上一次重建还没完成，跳过这次");
+            LOGGER.debug("CraftGraph previous rebuild still running; skipping this one");
             return;
         }
 
@@ -226,13 +229,13 @@ public final class ClientBridge {
             service.publish(recipes, tags, registriesById, names).whenComplete((snap, err) -> {
                 rebuildInFlight = false;
                 if (err != null) {
-                    LOGGER.error("CraftGraph 建索引失败：{}", err.getMessage());
+                    LOGGER.error("CraftGraph index build failed: {}", err.getMessage());
                     return;
                 }
                 // 耗时必须打出来：主线程占用多少直接决定玩家有没有感觉到卡顿。
                 // 抽取超过 ~200ms 就该考虑分帧切片了 —— 但先测量再优化。
-                LOGGER.info("CraftGraph 快照已重建：{} 条配方（其中 {} 条读不懂，{}%），"
-                                + "{} 个标签，dataVersion={}；主线程抽取 {} ms，建索引 {} ms",
+                LOGGER.info("CraftGraph snapshot rebuilt: {} recipes ({} unreadable, {}%), "
+                                + "{} tags, dataVersion={}; main-thread extraction {} ms, indexing {} ms",
                         snap.recipeCount(),
                         opaque,
                         snap.recipeCount() == 0 ? 0 : Math.round(opaque * 100.0 / snap.recipeCount()),
@@ -245,14 +248,14 @@ public final class ClientBridge {
                 // 之前这个异常被静默吞掉，导致「传了 null 注册表」这个 bug
                 // 伪装成「Minecraft 的限制」藏了很久 —— 所以失败必须有声音。
                 if (extractor.resultItemFailures() > 0) {
-                    LOGGER.warn("CraftGraph 有 {} 条配方的 getResultItem 抛了异常，"
-                                    + "它们的产出会被当作读不到。这是个 bug 信号，不是正常情况。",
+                    LOGGER.warn("CraftGraph: getResultItem threw for {} recipes; their outputs will read as "
+                                    + "unknown. That is a bug signal, not a normal condition.",
                             extractor.resultItemFailures());
                 }
 
                 if (extractor.toastSymbolFailures() > 0) {
-                    LOGGER.warn("CraftGraph 有 {} 条配方的 getToastSymbol 抛了异常，"
-                                    + "这些配方的机器会推断不出来。这是个 bug 信号，不是正常情况。",
+                    LOGGER.warn("CraftGraph: getToastSymbol threw for {} recipes; their machine cannot be inferred."
+                                    + " That is a bug signal, not a normal condition.",
                             extractor.toastSymbolFailures());
                 }
 
@@ -260,23 +263,24 @@ public final class ClientBridge {
                 // 而四个测试层都没发现（夹具里手写了 duration），
                 // 代价是产线计算的机器数整个失效了很久。所以这两个字段的覆盖度必须每次都报出来。
                 FieldCoverage coverage = extractor.coverage();
-                LOGGER.info("CraftGraph 字段覆盖度：{}", coverage.summary());
+                LOGGER.info("CraftGraph field coverage: {}", coverage.summary());
                 if (coverage.withDuration() > 0) {
-                    LOGGER.info("CraftGraph 带耗时数据的配方类型：{}",
-                            String.join("、", coverage.typesWithDuration()));
+                    LOGGER.info("CraftGraph recipe types with duration data: {}",
+                            String.join(", ", coverage.typesWithDuration()));
                 }
 
                 // 「本该有耗时却没读到」= 适配器没生效，不是数据缺失。
                 // 这条判据与适配器实现无关（写死的是 Minecraft 的事实），所以它抓的是真问题。
                 for (String broken : coverage.brokenTypes()) {
-                    LOGGER.warn("CraftGraph 字段覆盖度异常：{}。这些类型的耗时是平台保证有的，"
-                                    + "读到 null 更可能是解析出了问题而不是数据缺失 —— "
-                                    + "产线计算会把它们当成手工。", broken);
+                    LOGGER.warn("CraftGraph field coverage problem: {}. These types are guaranteed to carry a "
+                                    + "duration, so reading null points at a parsing problem rather than "
+                                    + "missing data -- production planning will treat them as manual.",
+                            broken);
                 }
 
                 if (opaque > 0) {
-                    LOGGER.info("CraftGraph 读不懂的配方占比 {}%。想看具体是哪些配方类型、"
-                                    + "是物理限制还是解析问题，运行 npm run inspect。",
+                    LOGGER.info("CraftGraph {}% of recipes are unreadable. To see which types and whether it is a "
+                                    + "platform limit or a parsing gap, run: npm run inspect",
                             Math.round(opaque * 100.0 / Math.max(1, snap.recipeCount())));
                 }
             });
@@ -284,7 +288,7 @@ public final class ClientBridge {
             rebuildInFlight = false;
             // 必须捕获 Throwable：主线程上逃逸出去的异常会把游戏搞崩，
             // 而「配方读不出来」远没有「游戏崩了」严重。
-            LOGGER.error("CraftGraph 重建配方快照时出错", t);
+            LOGGER.error("CraftGraph failed to rebuild the recipe snapshot", t);
         }
     }
 

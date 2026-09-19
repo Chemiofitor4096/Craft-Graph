@@ -32,7 +32,7 @@ public class CraftGraph {
 
     public CraftGraph(IEventBus modEventBus, ModContainer modContainer) {
         if (FMLEnvironment.dist != Dist.CLIENT) {
-            LOGGER.info("CraftGraph 是客户端模组，在专用服务器上不启动桥接服务");
+            LOGGER.info("CraftGraph is a client mod; bridge not started on a dedicated server");
             return;
         }
 
@@ -50,7 +50,7 @@ public class CraftGraph {
             } catch (Throwable t) {
                 // 桥接起不来不该让游戏起不来。玩家装这个 Mod 可能是忘了删，
                 // 也可能端口被占 —— 都该记一条日志然后继续游戏。
-                LOGGER.error("CraftGraph 桥接服务启动失败，AI 查询功能不可用", t);
+                LOGGER.error("CraftGraph bridge failed to start; AI queries unavailable", t);
             }
         });
     }

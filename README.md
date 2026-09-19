@@ -267,13 +267,28 @@ What is still missing, and why it is not a viewer problem either:
   rather than EMI.
 - Energy is still `null` everywhere.
 
-**Not yet tested against a large tech pack.** Modded machine recipes are the interesting case,
-and they are the ones most likely to be `opaque`. If you try it on a big pack, that number
-is the thing to look at.
+**Measured on a real Create-focused pack.** A medium pack built around Create
+(15,241 recipes, 3,585 tags, 70 recipe types) gave these numbers:
 
-**Vanilla-only measurements.** The performance and token figures above come from a near-vanilla
-instance. A pack with 50 000 recipes will behave differently — the snapshot build cost in
-particular is expected to grow.
+| | |
+|---|---|
+| Unreadable recipes | 632 / 15,241 (**4%**) |
+| Main-thread extraction | **155 ms** (indexing 2 ms) |
+| Recipes with a duration | 572 / 15,241 (3.8%) — all of them vanilla cooking types |
+| Recipes with a machine | 10,945 / 15,241 (71.8%) |
+
+Two things stand out. The 3.8% duration coverage is why Create machines got no machine
+counts: **no modded recipe type carried a duration**, because the duration lives in each
+mod's own field and there was no adapter for it. And the 28% without a machine are all
+modded machine types — a recipe viewer's catalysts are the only reliable source for those,
+which is the concrete reason JEI is worth integrating.
+
+`/snapshot` for this pack is ~10 MB of JSON. The extraction cost scales with recipe count
+(155 ms at 15k ≈ 10 µs/recipe), so 50,000 recipes would land near 500 ms — over the 200 ms
+budget, and the point where frame-slicing becomes necessary rather than optional.
+
+**Earlier measurements come from a near-vanilla instance** (1,290 recipes), so token figures
+in this README are quoted from there unless stated otherwise.
 
 **NeoForge 1.21.1 only.** No Fabric, no other Minecraft versions.
 

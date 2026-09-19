@@ -102,12 +102,27 @@ export interface ProductionPlan {
   truncated: boolean;
   /** 需要机器但耗时未知、只能手工的环节数 */
   manualSteps: number;
+  /**
+   * 上面那些环节里属于**原版工作台合成**的条数。
+   *
+   * 单独记一个数，是因为「耗时未知」有两种完全不同的原因，混为一谈会误导人：
+   *
+   * - `minecraft:crafting` —— 原版**设计上就没有耗时字段**，报「手工」是对的。
+   * - 模组机器配方（`create:filling` 之类）—— 是**我们读不到耗时**，那是数据缺口，
+   *   产线本该给出机器台数却给不出。
+   *
+   * 在 Create 专精的整合包上实测过这个混淆：产线头部写「耗时未知（通常是工作台合成）」，
+   * 而同一条输出下面写着「用 create:filling 制作」—— 填充机是机器不是工作台，
+   * 两句话自相矛盾，而且把「我们的缺口」说成了「原版就这样」。
+   */
+  manualCraftingSteps: number;
 }
 
 class PlanWalker extends ResolutionEngine {
   private nodeCount = 0;
   private truncated = false;
   private manualSteps = 0;
+  private manualCraftingSteps = 0;
 
   private readonly rawTotals = new Map<string, PlanRawMaterial>();
   private readonly machineTotals = new Map<string, PlanMachine>();
@@ -139,6 +154,7 @@ class PlanWalker extends ResolutionEngine {
       warnings: this.warnings,
       truncated: this.truncated,
       manualSteps: this.manualSteps,
+      manualCraftingSteps: this.manualCraftingSteps,
     };
   }
 
@@ -219,6 +235,9 @@ class PlanWalker extends ResolutionEngine {
       node.machines = null;
       node.secondsPerCraft = null;
       this.manualSteps++;
+      // 区分「原版就没有这个字段」和「我们读不到」。crafting 是前者，其余按后者处理 ——
+      // 宁可说成「读不到」也不要谎称「这是手工合成」。
+      if (recipe.type === "minecraft:crafting") this.manualCraftingSteps++;
       this.warnings.push(`${id} 用 ${recipe.type} 制作，但耗时未知，无法计算机器数`);
     } else {
       node.secondsPerCraft = recipe.duration / TICKS_PER_SECOND;

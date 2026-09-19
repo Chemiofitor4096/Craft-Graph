@@ -14,6 +14,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { RecipeStore, StackKind } from "./cache.js";
 import { describeStatus, StoreManager } from "./manager.js";
+import { opaqueHint } from "./opaque.js";
 import { calculatePlan, prunePlan } from "./plan.js";
 import { renderPlan, renderPlanTsv, renderTree, renderTreeTsv } from "./report.js";
 import { buildRecipeTree, pruneTree } from "./tree.js";
@@ -125,11 +126,24 @@ function recipeDetail(store: RecipeStore, r: Recipe): string {
 function recipeList(store: RecipeStore, recipes: Recipe[], heading: string, total: number): string {
   if (recipes.length === 0) return `## ${heading}\n\n_没有找到。_`;
 
-  const lines = [`## ${heading}`, "", `共 ${total} 条${recipes.length < total ? `，显示前 ${recipes.length} 条` : ""}`, ""];
+  const shown = recipes.length;
+  const lines = [`## ${heading}`, "", `共 ${total} 条${shown < total ? `，显示前 ${shown} 条` : ""}`, ""];
   for (const r of recipes) {
     const out = r.outputs[0];
     const outText = out ? `${out.count} × ${itemLabel(store, out.item)}` : "（产出未知）";
     lines.push(`- \`${r.id}\` — ${r.typeLabel ?? r.type} → ${outText}${r.opaque ? " ⚠️读不懂" : ""}`);
+  }
+  // 截断时要把「还有多少、怎么拿」写出来，不能只写「显示前 N 条」。
+  //
+  // 大包里这条不是小事：实测一个 Create 包的「糖能做什么」有 294 条，默认只回 30 条（10%），
+  // 而模型那次**没有**追加请求，直接拿这 10% 下了结论。
+  // 光陈述事实不够 —— 得把下一步动作摆在它面前。
+  if (shown < total) {
+    lines.push(
+      "",
+      `_还有 ${total - shown} 条没显示。需要更多就调大 limit（上限 200），` +
+        `或者用 type 或更具体的关键词把范围收窄 —— 不要把这 ${shown} 条当成全部。_`,
+    );
   }
   return lines.join("\n");
 }
@@ -314,23 +328,43 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
   server.registerTool(
     "get_recipe_details",
     {
-      title: "查看单条配方的完整信息",
-      description: "按 id 获取一条配方的完整输入输出、耗时、耗能。需要先通过其他查询拿到具体配方 id。",
+      title: "查看配方的完整信息",
+      description:
+        "按 id 获取配方的完整输入输出、耗时、耗能。需要先通过其他查询拿到具体配方 id。" +
+        "要看多条时用 recipeIds 一次传（最多 20 条）—— 逐条调用会让往返次数随配方数线性增长。",
       inputSchema: {
-        recipeId: z.string().describe('配方 id，形如 "minecraft:iron_ingot_from_smelting_iron_ore"'),
+        recipeId: z.string().optional().describe('单条配方 id，形如 "minecraft:iron_ingot_from_smelting_iron_ore"'),
+        recipeIds: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe("多条配方 id（最多 20）。给了它就忽略 recipeId"),
       },
     },
-    async ({ recipeId }) =>
+    async ({ recipeId, recipeIds }) =>
       guard(async () => {
         const s = await store();
-        const r = s.getRecipe(recipeId);
-        if (!r) {
-          const similar = s.allRecipes().filter((x) => x.id.includes(recipeId)).slice(0, 10);
-          let hint = "";
-          if (similar.length > 0) hint = `\n\n你是不是想找：\n${similar.map((x) => `- \`${x.id}\``).join("\n")}`;
-          return fail(`没有 id 为 \`${recipeId}\` 的配方。${hint}`);
+        // 两种入参都接受：只为兼容模型已经习惯的单条调用方式 ——
+        // 报错逼它换参数只会白费一轮往返，而往返是要花钱的。
+        const ids = recipeIds && recipeIds.length > 0 ? recipeIds : recipeId ? [recipeId] : [];
+        if (ids.length === 0) return fail("需要提供 recipeId 或 recipeIds。");
+
+        const found = ids.filter((id) => s.getRecipe(id) !== undefined);
+        const missing = ids.filter((id) => s.getRecipe(id) === undefined);
+
+        if (found.length === 0) {
+          // 一条都找不到时给「你是不是想找」的提示（保留原来单条调用的行为）
+          const probe = ids[0]!;
+          const similar = s.allRecipes().filter((x) => x.id.includes(probe)).slice(0, 10);
+          const hint =
+            similar.length > 0 ? `\n\n你是不是想找：\n${similar.map((x) => `- \`${x.id}\``).join("\n")}` : "";
+          return fail(`没有 id 为 \`${probe}\` 的配方。${hint}`);
         }
-        return ok(recipeDetail(s, r));
+
+        const body = found.map((id) => recipeDetail(s, s.getRecipe(id)!)).join("\n\n");
+        const tail =
+          missing.length > 0 ? `\n\n_（有 ${missing.length} 条找不到，已跳过：${missing.join("、")}）_` : "";
+        return ok(body + tail);
       }),
   );
 
@@ -355,7 +389,7 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
           if (all.length > 0) {
             return ok(
               `\`${item}\` 有 ${all.length} 条配方，但都读不懂输入输出（类型：${[...new Set(all.map((r) => r.type))].join(", ")}）。` +
-                `装 EMI 或加适配层后可以比较。`,
+                opaqueHint(all.map((r) => r.type)),
             );
           }
           return ok(`\`${item}\` 没有已知配方，是基础资源。`);

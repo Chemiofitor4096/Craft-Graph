@@ -60,7 +60,8 @@ class FieldCoverageTest {
         assertEquals(0, c.total());
         assertTrue(c.brokenTypes().isEmpty());
         assertNull(c.durationRatio("minecraft:smelting"));
-        assertTrue(c.summary().contains("没有配方"));
+        // 覆盖度摘要会进日志，所以是英文（见 LogEncodingTest）
+        assertTrue(c.summary().contains("no recipes"));
     }
 
     @Test

@@ -136,6 +136,27 @@ function legendFor(nodes: TreeNode[]): string | null {
   return parts.length > 0 ? `> 图例：${parts.join("｜")}` : null;
 }
 
+/**
+ * 「为什么给不出机器数」的答案，就地放在产线/配方树的输出里。
+ *
+ * <h2>为什么不只在 get_bridge_status 里说</h2>
+ *
+ * 在 Create 专精的整合包上实测：模型为了拿到「耗时只覆盖 X%」这一句，
+ * 专门多调了一次 `get_bridge_status` —— 而它真正需要这句话的地方，
+ * 恰恰是产线算不出机器数的那个输出。**告警要出现在它起作用的地方。**
+ *
+ * <p>同时它回答的是玩家最自然的那个疑问：「为什么这些环节都是手工？」
+ */
+function coverageCaveat(store: RecipeStore): string {
+  const c = computeFieldCoverage(store.allRecipes());
+  if (c.total === 0) return "";
+  const pct = ((c.withDuration * 100) / c.total).toFixed(1);
+  return (
+    `> ℹ️ 本包耗时只覆盖 ${c.withDuration}/${c.total} 条（${pct}%）—— ` +
+    `原版只有熔炼类配方带这个字段，模组的机器配方要靠对应的适配器才读得到。`
+  );
+}
+
 function renderTreeNode(store: RecipeStore, node: TreeNode, depth: number, lines: string[]): void {
   const indent = "  ".repeat(depth);
   const mark = KIND_MARK[node.kind];
@@ -273,10 +294,28 @@ export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel
     lines.push("");
   }
   if (plan.manualSteps > 0) {
-    lines.push(
-      `> ℹ️ 有 ${plan.manualSteps} 个环节耗时未知（通常是工作台合成），无法计算机器数量，` +
-        `只能给出合成次数。`,
-    );
+    // 不要把两种原因混成一句「通常是工作台合成」：
+    // 模组机器配方读不到耗时是我们的数据缺口，说成「手工合成」会让玩家照着建错线，
+    // 也会让模型以为这台机器不需要配比。见 ProductionPlan.manualCraftingSteps。
+    const machineSteps = plan.manualSteps - plan.manualCraftingSteps;
+    if (plan.manualCraftingSteps > 0 && machineSteps === 0) {
+      lines.push(`> ℹ️ 有 ${plan.manualCraftingSteps} 个工作台合成环节，没有耗时字段（原版设计如此），只能给出合成次数。`);
+    } else if (machineSteps > 0 && plan.manualCraftingSteps === 0) {
+      lines.push(
+        `> ⚠️ 有 ${machineSteps} 个环节是机器加工，但**读不到耗时数据**（这些配方类型没有耗时字段），` +
+          `所以给不出机器台数，只能给出合成次数。`,
+      );
+      lines.push("");
+      lines.push(coverageCaveat(store));
+    } else {
+      lines.push(
+        `> ℹ️ 有 ${plan.manualSteps} 个环节给不出机器数量：` +
+          `${plan.manualCraftingSteps} 个工作台合成（原版没有耗时字段），` +
+          `${machineSteps} 个机器加工但读不到耗时。`,
+      );
+      lines.push("");
+      lines.push(coverageCaveat(store));
+    }
     lines.push("");
   }
 
@@ -494,7 +533,14 @@ export function renderPlanTsv(store: RecipeStore, plan: ProductionPlan, targetLa
 
   lines.push(`# 产线规划 每分钟 ${plan.target.ratePerMinute} × ${targetLabel}`);
   if (plan.truncated) lines.push("# ⚠️ 未完全展开，原料偏低，不能直接照着建。");
-  if (plan.manualSteps > 0) lines.push(`# 有 ${plan.manualSteps} 个环节耗时未知（多为工作台合成），无法计算机器数。`);
+  if (plan.manualSteps > 0) {
+    const machineSteps = plan.manualSteps - plan.manualCraftingSteps;
+    const detail =
+      machineSteps > 0
+        ? `其中 ${machineSteps} 个是机器加工但读不到耗时（数据缺口）`
+        : `其中 ${plan.manualCraftingSteps} 个工作台合成本就没有耗时字段`;
+    lines.push(`# 有 ${plan.manualSteps} 个环节无法计算机器数（${detail}）。`);
+  }
 
   lines.push("# 机器");
   lines.push("# 列 machine|count|recipes");

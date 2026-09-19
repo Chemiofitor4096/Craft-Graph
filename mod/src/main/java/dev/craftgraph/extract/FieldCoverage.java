@@ -96,9 +96,9 @@ public final class FieldCoverage {
             if (stat.withDuration() == stat.total()) continue;
 
             String detail = stat.withDuration() == 0
-                    ? "一条耗时都没读到"
-                    : "只有 " + stat.withDuration() + " 条读到耗时";
-            out.add(typeId + " 有 " + stat.total() + " 条配方，但" + detail);
+                    ? "none of them has a duration"
+                    : "only " + stat.withDuration() + " has a duration";
+            out.add(typeId + ": " + stat.total() + " recipes, but " + detail);
         }
         return out;
     }
@@ -123,8 +123,8 @@ public final class FieldCoverage {
 
     /** 一行摘要，直接进日志。 */
     public String summary() {
-        if (total == 0) return "没有配方，无法统计覆盖度";
-        return String.format("耗时 %d/%d（%s%%），机器 %d/%d（%s%%）",
+        if (total == 0) return "no recipes, coverage unknown";
+        return String.format("duration %d/%d (%s%%), machine %d/%d (%s%%)",
                 withDuration, total, percent(withDuration),
                 withMachine, total, percent(withMachine));
     }

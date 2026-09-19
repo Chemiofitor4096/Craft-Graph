@@ -101,7 +101,7 @@ public final class DiscoveryFile {
         writeQuietly(gameDirCopy, json);
         writeQuietly(userDirCopy, json);
 
-        LOGGER.info("CraftGraph bridge 发现文件已写入：{}", gameDirCopy);
+        LOGGER.info("CraftGraph bridge discovery file written: {}", gameDirCopy);
     }
 
     private void writeQuietly(Path path, String json) {
@@ -110,7 +110,7 @@ public final class DiscoveryFile {
             Files.writeString(path, json, StandardCharsets.UTF_8);
         } catch (IOException e) {
             // 写不进去不影响服务本身，只是 MCP Server 要手动配置地址
-            LOGGER.warn("写发现文件失败：{}（{}）", path, e.getMessage());
+            LOGGER.warn("Failed to write discovery file: {} ({})", path, e.getMessage());
         }
     }
 
@@ -129,7 +129,7 @@ public final class DiscoveryFile {
         try {
             Files.deleteIfExists(path);
         } catch (IOException e) {
-            LOGGER.warn("删除发现文件失败：{}（{}）", path, e.getMessage());
+            LOGGER.warn("Failed to delete discovery file: {} ({})", path, e.getMessage());
         }
     }
 
