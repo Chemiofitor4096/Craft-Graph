@@ -117,6 +117,29 @@ location are written, so custom game directories work too.
 Start Minecraft, load a world, and ask your AI client something. If it says it cannot reach
 the game, `get_bridge_status` will tell you exactly what is wrong.
 
+## Use it as a dependency
+
+The mod is also published to **KessokuMaven**, so you can depend on it instead of building it
+from source. The intended use is writing your own client for the bridge protocol and reusing
+its DTOs (`dev.craftgraph.api.Models`) instead of re-declaring them by hand.
+
+```groovy
+repositories {
+    maven { url = 'https://maven.kessokuteatime.work/releases' }
+}
+
+dependencies {
+    // Compile against the DTOs only. To also load the mod at runtime, put the jar in mods/.
+    compileOnly 'dev.craftgraph:craftgraph:0.1.0'
+}
+```
+
+A sources jar is published alongside, so the DTOs are readable from your IDE. They are a
+direct mirror of [`doc/protocol.md`](doc/protocol.md) — **that document is the real contract**,
+and it is the one to follow if the two ever disagree.
+
+Browse published versions: <https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph>
+
 ## How it works
 
 ```text

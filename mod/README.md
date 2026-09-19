@@ -265,6 +265,12 @@ export K_MAVEN_USERNAME=... K_MAVEN_TOKEN=...    # Git Bash
 ```
 
 产物坐标 `dev.craftgraph:craftgraph:<version>`，含 sources jar。
+仓库地址 `https://maven.kessokuteatime.work/releases`，
+已发布的版本可以在 <https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph> 浏览。
+
+⚠️ **发布过的版本号不要复用。** 同一个 `0.1.0` 覆盖成不同的字节，会让依赖方的缓存
+（Gradle、Maven 本地库）拿到哪个版本全看运气，而且报错完全指不到原因。
+改了东西就升 `mod_version` 再发。
 
 只想验证产物本身对不对，用 `./gradlew publishToMavenLocal` —— 它不需要凭据，
 会写到 `~/.m2/repository/`，可以拿来检查生成的 POM。

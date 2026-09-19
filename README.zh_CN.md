@@ -112,6 +112,28 @@ MCP Server 自己去那里找。原版启动器和第三方启动器的位置都
 启动 Minecraft、进入存档，然后问 AI 客户端一个问题。如果它说连不上游戏，
 `get_bridge_status` 会准确告诉你哪里不对。
 
+## 作为依赖使用
+
+Mod 也发布到了 **KessokuMaven**，可以不从源码构建，直接依赖它。主要用途是：你想自己写一个
+对接 bridge 协议的客户端时，复用它的 DTO（`dev.craftgraph.api.Models`），不用手工再抄一遍。
+
+```groovy
+repositories {
+    maven { url = 'https://maven.kessokuteatime.work/releases' }
+}
+
+dependencies {
+    // 只在编译期用到 DTO 就写 compileOnly；要在运行时也加载这个 Mod，把 jar 放进 mods 目录
+    compileOnly 'dev.craftgraph:craftgraph:0.1.0'
+}
+```
+
+同时发布了 sources jar，DTO 在 IDE 里可以直接看。它们是
+[`doc/protocol.md`](doc/protocol.md) 的逐字镜像 —— **那份文档才是真正的契约**，
+两者冲突时以文档为准。
+
+浏览已发布的版本：<https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph>
+
 ## 它是怎么工作的
 
 ```text
