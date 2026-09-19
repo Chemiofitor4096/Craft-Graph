@@ -23,6 +23,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { encode } from "gpt-tokenizer";
 
+// 解析与渲染住在一起、由 smoke 的往返测试钉住 —— 这里曾因为「只在一侧有实现」而把
+// 机器覆盖度的分子分母取错，断言因此永远为真。
+import { parseFieldCoverage } from "./report.js";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -57,39 +61,6 @@ const FIELD_EXPECTATIONS: Record<string, { duration: boolean | null; machine: st
   "minecraft:stonecutting": { duration: false, machine: "minecraft:stonecutter" },
   "minecraft:crafting": { duration: false, machine: "minecraft:crafting_table" },
 };
-
-interface Coverage {
-  total: number;
-  withDuration: number;
-  withMachine: number;
-  types: { type: string; withDuration: number; total: number }[];
-}
-
-/**
- * 从 get_bridge_status 的输出里解出字段覆盖度。
- *
- * 解析渲染后的 markdown 是有点脆的，但这是刻意的：agent 看到的就是这个字符串。
- * 如果 agent 读不到这两个数字，那它也就没法告诉玩家「机器数只对一部分配方有效」——
- * 断言和实际使用同一个输入，才不会出现「测试能测到、模型看不到」。
- */
-function parseCoverage(text: string): Coverage | null {
-  const m = text.match(/字段覆盖：耗时 (\d+)\/(\d+)[^·]*· 机器 (\d+)\/(\d+)/);
-  if (!m) return null;
-
-  const types: Coverage["types"] = [];
-  const typeLine = text.match(/带耗时的类型：(.*)$/m);
-  for (const part of typeLine?.[1]?.split("、") ?? []) {
-    const t = part.match(/^([\w:.\-]+) (\d+)\/(\d+)$/);
-    if (t) types.push({ type: t[1]!, withDuration: Number(t[2]), total: Number(t[3]) });
-  }
-
-  return {
-    total: Number(m[2]),
-    withDuration: Number(m[1]),
-    withMachine: Number(m[4]),
-    types,
-  };
-}
 
 /** 从配方列表里取出 id（渲染形如 ``- `id` — 类型 → 产出``）。 */
 function parseRecipeIds(text: string): string[] {
@@ -257,7 +228,7 @@ try {
   // 所以它们在任何整合包上都成立：包可以删掉配方，但删不掉「熔炼配方带耗时」这件事。
 
   // ---- 先看聚合覆盖度（一个调用就能发现「字段全是 null」这种退化）----
-  const coverage = parseCoverage(statusText);
+  const coverage = parseFieldCoverage(statusText);
   check(
     "get_bridge_status 报出字段覆盖度（否则「字段悄悄全是 null」没人看得见）",
     coverage !== null,
@@ -275,13 +246,37 @@ try {
       coverage.withMachine > 0,
       `机器 ${coverage.withMachine}/${coverage.total}`,
     );
-    // 列出来的每个类型都必须是满覆盖：出现 N/M（M>N）说明部分配方走了别的代码路径，
-    // 而「部分读不到」和「全读不到」是同一个 bug 的两副面孔。
-    const partial = coverage.types.filter((t) => t.withDuration !== t.total);
+    // 覆盖度**完整性**只对「平台保证有耗时」的类型断言。
+    //
+    // 这条断言原本是「凡是被列进『带耗时』的类型都必须满覆盖」，在近原版实例上成立，
+    // 一跑到整合包上就红了 —— 因为模组类型的耗时**可能部分缺失**：
+    // Create 有些配方类型本身不允许指定 duration（`canSpecifyDuration()` 为 false），
+    // 那时值就是 0，我们如实报 null。所以那里出现「N/M（M>N）」是正确行为，不是 bug。
+    //
+    // 现在只钉住真正的保证：原版那四种烹饪类型（Mod 侧 MUST_HAVE_DURATION 的定义）
+    // 只要在这个包里存在，就必须 100% 读到耗时。
+    const MUST_HAVE_DURATION = [
+      "minecraft:smelting",
+      "minecraft:blasting",
+      "minecraft:smoking",
+      "minecraft:campfire_cooking",
+    ];
+    const guaranteed = coverage.durationTypes.filter((t) => MUST_HAVE_DURATION.includes(t.type));
+    const broken = guaranteed.filter((t) => t.withDuration !== t.total);
     check(
-      "被列出「带耗时」的配方类型都是满覆盖",
-      partial.length === 0,
-      partial.map((t) => `${t.type} ${t.withDuration}/${t.total}`).join("、"),
+      "原版烹饪类型（熔炼/高炉/烟熏/营火）只要有配方就是满覆盖",
+      broken.length === 0,
+      broken.length > 0
+        ? broken.map((t) => `${t.type} ${t.withDuration}/${t.total}`).join("、")
+        : `核对到 ${guaranteed.length} 种：${guaranteed.map((t) => `${t.type} ${t.withDuration}/${t.total}`).join("、")}`,
+    );
+    // 一种都没核对到 = 烹饪适配器整个没生效。这不该在任何有熔炉配方的包里发生，
+    // 所以判失败而不是跳过 —— 「没验到」和「验过了」必须分得开。
+    // （注意类型列表会被截断，所以用 durationTypeCount 判断而不是列表长度。）
+    check(
+      "至少核对到一种原版烹饪类型（否则烹饪适配器没生效）",
+      guaranteed.length > 0,
+      `带耗时的类型共 ${coverage.durationTypeCount} 种，列表已截断时烹饪类型也可能没被列出来`,
     );
   }
 
@@ -372,9 +367,11 @@ try {
   //
   // 怎么找到这些配方：用模板物品去查「哪些配方把它当输入」。
   // 这本身就是修复的端到端证据 —— 修复前锻造没有输入，倒排索引里查不到它们。
+  // 标签刻意不带数量：近原版是 9 / 18 条，但整合包里这两个模板还会被别的模组加配方
+  // （实测 All of Create 里 smithing 共 63 条）。写死数量只会让日志说谎。
   const SMITHING_PROBES = [
-    { template: "minecraft:netherite_upgrade_smithing_template", trimming: false, label: "下界合金升级（9 条）" },
-    { template: "minecraft:sentry_armor_trim_smithing_template", trimming: true, label: "盔甲纹饰（18 条）" },
+    { template: "minecraft:netherite_upgrade_smithing_template", trimming: false, label: "下界合金升级模板" },
+    { template: "minecraft:sentry_armor_trim_smithing_template", trimming: true, label: "盔甲纹饰模板" },
   ] as const;
 
   for (const probe of SMITHING_PROBES) {
@@ -432,17 +429,18 @@ try {
         `第 2 个输入 = ${inputOnly[1] ?? "（没有）"}`,
       );
     } else {
-      // 升级配方：template 是模板物品、base 是**具体的那把钻石工具**（每把工具一条配方）、
-      // addition 在 NeoForge 下是标签（#c:ingots/netherite）。
-      // 这里不断言「三个槽都是具体物品」—— 那是错的（实测踩过）。
-      // 改成跨字段校验：模板槽 + 钻石工具 + 下界合金产出，三者对得上才说明
-      // 三个槽分别来自 template / base / addition 三个字段，而不是同一个字段抄了三遍。
+      // 升级配方：三个槽必须**互不相同**、且第一个是探针模板 —— 这才说明它们分别来自
+      // template / base / addition 三个字段，而不是同一个字段被抄了三遍。
+      //
+      // 这里刻意**不**断言「base 是钻石工具」：那只在原版下界合金那 9 条上成立。
+      // 实测 All of Create 里探针第一个命中的是
+      // `create:crafting/appliances/netherite_backtank_from_netherite`，
+      // base 是下界合金胸甲、addition 是铜背罐 —— 断言写死就会误报。
+      const slots = inputOnly.slice(0, 3);
       check(
-        `${probe.label}：三个槽分别来自 template / base / addition（模板 + 钻石工具 + 下界合金产出）`,
-        (inputOnly[0] ?? "").includes(probe.template) &&
-          (inputOnly[1] ?? "").includes("diamond") &&
-          /netherite_/.test(detailText.match(/输出：\n([\s\S]*)/)?.[1] ?? ""),
-        `输入 = ${inputOnly.slice(0, 3).join(" | ")}`,
+        `${probe.label}：三个槽互不相同，且第一个是探针模板（说明来自三个不同字段）`,
+        slots.length === 3 && new Set(slots).size === 3 && (slots[0] ?? "").includes(probe.template),
+        `输入 = ${slots.join(" | ")}`,
       );
     }
 
@@ -512,8 +510,13 @@ try {
       );
       process.stdout.write(`\n· Create 样本 → \`${sample.id}\`（${sample.typeLabel}）\n${detail}\n\n`);
 
-      const guaranteed = (detail.match(/^输出：\n((?:- .*\n)*)/m)?.[1] ?? "").split("\n").filter((l) => l.startsWith("- "));
+      // 输出段里带「概率」的行是概率产出，其余是必然产出。分开数。
+      // （原来把整段都算成必然产出，日志里会报出一个不可能的数字。）
+      const outLines = (detail.match(/^输出：\n((?:- .*\n)*)/m)?.[1] ?? "")
+        .split("\n")
+        .filter((l) => l.startsWith("- "));
       const chances = [...detail.matchAll(/概率 ([\d.]+)%/g)].map((m) => Number(m[1]));
+      const guaranteed = outLines.filter((l) => !l.includes("概率"));
       const hasFluid = /mB/.test(detail.split("输入：")[1] ?? "") || /- \d+ mB/.test(detail);
 
       // ① 耗时：Create 机器能不能算出真实台数的关键，而视图器给不了这个数据

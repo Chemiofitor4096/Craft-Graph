@@ -36,6 +36,65 @@ export interface FieldCoverage {
   durationTypes: { type: string; withDuration: number; total: number }[];
 }
 
+/**
+ * 从 `get_bridge_status` 渲染出来的文本里**读回**覆盖度。
+ *
+ * <h2>为什么它必须和渲染函数住在同一个文件</h2>
+ *
+ * 它一开始写在 `live.ts` 里（那是唯一的使用者），于是**没有任何测试碰得到它** ——
+ * 结果它把「机器」那一对数取错了：分母当成了分子。症状很阴险：
+ *
+ * - 断言打印出「机器 15241/15241」，而真实是「10945/15241」；
+ * - 而且 `withMachine > 0` 因为拿到了分母，**永远为真** —— 一条不可能失败的断言。
+ *
+ * 在近原版实例上它没被发现，因为那里的机器覆盖恰好是 100%，两个数字相同。
+ * 第一次跑到覆盖不全的整合包上才露出来。
+ *
+ * 所以：渲染与解析放在一起，由 smoke 的往返测试钉住（渲染 → 解析 → 数字必须回到原值）。
+ * **只在一侧有实现、又没有测试的格式约定，迟早会漂移。**
+ *
+ * @returns 解析不出覆盖度行时返回 {@code null}（旧版 Mod 没有这一行）
+ */
+export function parseFieldCoverage(text: string): FieldCoverageWithListing | null {
+  const m = text.match(/字段覆盖：耗时 (\d+)\/(\d+)[^·]*· 机器 (\d+)\/(\d+)/);
+  if (!m) return null;
+
+  const durationTypes: FieldCoverage["durationTypes"] = [];
+  let durationTypeCount = 0;
+  const typeLine = text.match(/带耗时的类型：(.*)$/m);
+  let listText = typeLine?.[1] ?? "";
+
+  // 类型多的时候渲染会截断成「…、createdieselgenerators:bulk_fermenting 4/4，等 18 种」——
+  // 注意那一项和「等 N 种」之间是**中文逗号**，不是顿号。
+  // 不先把这段切掉的话，最后一项会因为正则不匹配而被丢掉，总数也读不到
+  // （实测：整合包 18 种类型时丢一项，而断言拿它当全部）。
+  const more = listText.match(/，?等 (\d+) 种$/);
+  if (more) {
+    durationTypeCount = Number(more[1]);
+    listText = listText.slice(0, listText.length - more[0].length);
+  }
+
+  for (const part of listText.split("、")) {
+    const t = part.match(/^([\w:.\-]+) (\d+)\/(\d+)$/);
+    if (t) durationTypes.push({ type: t[1]!, withDuration: Number(t[2]), total: Number(t[3]) });
+  }
+  if (durationTypeCount === 0) durationTypeCount = durationTypes.length;
+
+  return {
+    total: Number(m[2]),
+    withDuration: Number(m[1]),
+    withMachine: Number(m[3]),
+    durationTypes,
+    durationTypeCount,
+  };
+}
+
+/** 解析结果附带「列表是否被截断」的信息 —— 断言不该把「列出来的那几种」当成全部。 */
+export interface FieldCoverageWithListing extends FieldCoverage {
+  /** 带耗时的类型总共多少种（含被截断没列出来的）。 */
+  durationTypeCount: number;
+}
+
 export function computeFieldCoverage(recipes: Recipe[]): FieldCoverage {
   // 两个 map 分开数，一遍扫完。刻意不用「遇到有耗时的条目才建桶」那种写法 ——
   // 那样桶里的 total 会取决于配方出现的顺序，把覆盖率算得比实际好看，

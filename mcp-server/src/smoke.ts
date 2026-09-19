@@ -25,7 +25,8 @@ const { RecipeStore } = await import("./cache.js");
 const { buildRecipeTree, flattenTree, pruneTree, subtreeStats } = await import("./tree.js");
 const { pickCanonical } = await import("./resolution.js");
 const { calculatePlan, prunePlan } = await import("./plan.js");
-const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv } = await import("./report.js");
+const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv, computeFieldCoverage, renderFieldCoverage, parseFieldCoverage } =
+  await import("./report.js");
 const { opaqueHint } = await import("./opaque.js");
 
 const PORT = 25599;
@@ -292,6 +293,53 @@ try {
     "提示里都给出可执行的下一步（用 JEI 核对）",
     opaqueHint(["create:mixing"]).includes("JEI"),
     opaqueHint(["create:mixing"]),
+  );
+
+  // ---- 覆盖度：渲染 → 解析 必须回到原值 ----
+  //
+  // 这条测试是为了一个真实的 bug：解析实现写在 live.ts 里（唯一使用者），于是没有测试碰得到它，
+  // 结果它把「机器」那一对数的分母当成了分子。症状很阴险 —— 断言打印「15241/15241」而真实是
+  // 「10945/15241」，而且 `withMachine > 0` 因为拿到分母**永远为真**，那条断言不可能失败。
+  // 在覆盖度恰好 100% 的实例上永远看不出来，第一次跑到覆盖不全的整合包上才露出来。
+  //
+  // 所以下面刻意让三个数字**互不相等**：字段取错时往返就会不匹配。
+  const fakeRecipes = [
+    { type: "minecraft:smelting", duration: 200, machine: "minecraft:furnace" },
+    { type: "minecraft:smelting", duration: 200, machine: null },
+    { type: "create:crushing", duration: null, machine: null },
+  ] as unknown as import("./types.js").Recipe[];
+  const computed = computeFieldCoverage(fakeRecipes);
+  const parsed = parseFieldCoverage(renderFieldCoverage(computed).join("\n"));
+  check(
+    "覆盖度往返一致（渲染 → 解析回到原值）",
+    parsed !== null &&
+      parsed.total === computed.total &&
+      parsed.withDuration === computed.withDuration &&
+      parsed.withMachine === computed.withMachine,
+    `计算 ${computed.withDuration}/${computed.total} 机器 ${computed.withMachine}；` +
+      `解析 ${parsed?.withDuration}/${parsed?.total} 机器 ${parsed?.withMachine}`,
+  );
+  check(
+    "★ 覆盖度三个数字互不相等时也不串位（这正是那个取错分子的 bug）",
+    computed.total !== computed.withDuration &&
+      computed.total !== computed.withMachine &&
+      parsed?.withMachine === computed.withMachine &&
+      parsed?.withMachine !== parsed?.total,
+    `机器 ${parsed?.withMachine}/${parsed?.total}（若等于总数说明又取成分母了）`,
+  );
+  check(
+    "类型列表被截断时能读出总种数（不能把列出来的当成全部）",
+    (() => {
+      const many = Array.from({ length: 12 }, (_, i) => ({
+        type: `somemod:t${i}`,
+        duration: 10,
+        machine: "somemod:m",
+      })) as unknown as import("./types.js").Recipe[];
+      const rendered = renderFieldCoverage(computeFieldCoverage(many)).join("\n");
+      const back = parseFieldCoverage(rendered);
+      return back !== null && back.durationTypeCount === 12 && back.durationTypes.length < 12;
+    })(),
+    "12 种类型应该只列出前 8 种，但总数要能读回来",
   );
 
   // ---- 产线裁剪 ----
