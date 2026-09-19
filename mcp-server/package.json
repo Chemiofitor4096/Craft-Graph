@@ -1,0 +1,37 @@
+{
+  "name": "craftgraph-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "让 AI 查询 Minecraft 配方、构建配方树、规划产线的 MCP 服务器",
+  "type": "module",
+  "bin": {
+    "craftgraph-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "mock": "tsx src/mock-bridge.ts",
+    "smoke": "tsx src/smoke.ts",
+    "e2e": "tsx src/e2e.ts",
+    "measure": "tsx src/measure.ts",
+    "analyze": "tsx src/analyze-output.ts",
+    "compare": "tsx src/format-compare.ts",
+    "contract": "tsx src/contract.ts",
+    "live": "tsx src/live.ts",
+    "inspect": "tsx src/inspect.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "gpt-tokenizer": "^4.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
