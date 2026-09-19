@@ -154,8 +154,19 @@ export class ResolutionEngine {
     // 只用概率产出该物品的，重罚（数量算不准）
     if (this.guaranteedYield(id, recipe) <= 0) score += 1_000;
 
-    // 输入槽位越少越简单
-    score += recipe.inputs.length * 10;
+    // 输入用**合并后**的槽位数，不能用 recipe.inputs.length。
+    //
+    // 原版有序合成把「8 个金锭 + 1 个苹果」表示成 9 个槽位 —— 那是 3×3 网格的产物，
+    // 不是复杂度。用原始槽位数会把它算成 10×9 = 90，于是任何 2 输入的机器配方都碾压它。
+    // 实测 All of Create 里「金苹果怎么做」因此选了
+    // `createdieselgenerators:basin_fermenting/golden_apple`（发酵，还带 250mB create:potion），
+    // 而不是工作台那条正常路线。改成合并后：工作台 2 个（金锭 + 苹果），
+    // 发酵 3 个（苹果 + 金锭 + 药水），比较才回到同一起跑线。
+    //
+    // 代价：这里每个候选配方都会做一次标签解析（mergeInputs 内部会 resolveIngredient）。
+    // 相对整棵树的构建开销可以接受，而且**打分与递归用同一个「合并」定义**更重要 ——
+    // 两处用不同的尺子量同一件事，正是这类启发式出怪结果的原因。
+    score += this.mergeInputs(recipe.inputs).merged.length * 10;
 
     // 一次产出越多越好（略微偏好），上限 9 避免支配其他因素
     score -= Math.min(this.computeYield("item", id, recipe).perCraft, 9);

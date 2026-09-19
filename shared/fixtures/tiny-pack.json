@@ -254,6 +254,51 @@
       "energy": null,
       "source": "adapter",
       "opaque": false
+    },
+
+    {
+      "_note": "选路用：9 个槽位但只有 2 种不同输入（模拟原版有序合成的 3×3 网格）。合并后应胜过下面那条 3 输入的机器配方。",
+      "id": "examplepack:gadget_shaped",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "minecraft:planks" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "minecraft:planks" }] }
+      ],
+      "outputs": [{ "item": "examplepack:gadget", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "_note": "选路用：只有 3 个槽位，但三种输入各不相同 —— 合并后是 3，所以应当输给上面那条合并后只有 2 的。",
+      "id": "examplepack:gadget_machined",
+      "type": "examplepack:machine",
+      "typeLabel": "Machining",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "item", "id": "minecraft:stick" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "minecraft:planks" }] }
+      ],
+      "outputs": [{ "item": "examplepack:gadget", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "examplepack:machining",
+      "duration": 100,
+      "energy": null,
+      "source": "adapter",
+      "opaque": false
     }
   ]
 }

@@ -53,7 +53,7 @@ try {
   const store = await RecipeStore.load(client);
   const status = store.status;
 
-  check("缓存加载成功", status.recipeCount === 12, `recipeCount=${status.recipeCount}（期望 12）`);
+  check("缓存加载成功", status.recipeCount === 14, `recipeCount=${status.recipeCount}（期望 14）`);
   check("标签加载成功", status.tagCount === 5, `tagCount=${status.tagCount}（期望 5）`);
   check("在线状态标记正确", status.offline === false, `offline=${status.offline}`);
 
@@ -242,6 +242,26 @@ try {
     workbenchPlan.includes("工作台合成") && workbenchPlan.includes("原版设计如此"),
     workbenchPlan.split("\n").slice(0, 12).join(" / "),
   );
+  // ---- 选路：用「合并后的槽位数」而不是原始槽位数 ----
+  //
+  // 原版有序合成把「8 个金锭 + 1 个苹果」表示成 9 个槽位，那是 3×3 网格的产物不是复杂度。
+  // 用原始槽位数会让任何 2 输入的机器配方碾压它 —— 实测 All of Create 里
+  // 「金苹果怎么做」因此选了发酵（还带 250mB 药水），而不是工作台。
+  //
+  // 夹具里两条候选：一条 8 槽位但只有 2 种不同输入，一条 3 槽位三种不同输入。
+  // 按合并后的数量算，前者（2）应当胜过后者（3）。
+  const gadgetTree = renderTree(
+    store,
+    buildRecipeTree(store, "item", "examplepack:gadget", 1),
+    "test",
+    2,
+  );
+  check(
+    "★ 选路按合并后的输入数：8 槽位/2 种输入的合成配方胜过 3 槽位/3 种输入的机器配方",
+    gadgetTree.includes("examplepack:gadget_shaped") && !gadgetTree.includes("examplepack:gadget_machined"),
+    gadgetTree.split("\n").slice(0, 8).join(" / "),
+  );
+
   check(
     "★ 不再把所有「耗时未知」都说成「工作台合成」",
     !workbenchPlan.includes("通常是工作台合成") && !workbenchPlan.includes("多为工作台合成"),
@@ -468,7 +488,7 @@ try {
   const offlineStore = await RecipeStore.load(client);
   check(
     "游戏关掉后能退到磁盘快照",
-    offlineStore.status.offline === true && offlineStore.status.recipeCount === 12,
+    offlineStore.status.offline === true && offlineStore.status.recipeCount === 14,
     `offline=${offlineStore.status.offline} recipeCount=${offlineStore.status.recipeCount}`,
   );
 

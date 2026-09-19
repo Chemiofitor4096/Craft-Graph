@@ -246,38 +246,19 @@ try {
       coverage.withMachine > 0,
       `机器 ${coverage.withMachine}/${coverage.total}`,
     );
-    // 覆盖度**完整性**只对「平台保证有耗时」的类型断言。
+    // 「耗时完整性」不在这一层断言，理由是两条都试过、两条都不成立：
     //
-    // 这条断言原本是「凡是被列进『带耗时』的类型都必须满覆盖」，在近原版实例上成立，
-    // 一跑到整合包上就红了 —— 因为模组类型的耗时**可能部分缺失**：
-    // Create 有些配方类型本身不允许指定 duration（`canSpecifyDuration()` 为 false），
-    // 那时值就是 0，我们如实报 null。所以那里出现「N/M（M>N）」是正确行为，不是 bug。
+    //  - 原本写「凡是被列进『带耗时』的类型都必须满覆盖」→ 在整合包上误报。
+    //    模组类型的耗时**本来就可能部分缺失**（Create 有些类型不允许指定 duration，
+    //    `canSpecifyDuration()` 为 false，值就是 0，我们如实报 null），
+    //    那里出现「N/M（M>N）」是正确行为。
+    //  - 改成「原版四种烹饪类型只要被列出来就必须满覆盖」→ 又误报，因为类型明细
+    //    是**按字母序截断**的：All of Create 有 18 种带耗时的类型，列出的 8 条全被
+    //    `create:*` / `createdieselgenerators:*` 占满，`minecraft:smelting` 根本排不进去。
     //
-    // 现在只钉住真正的保证：原版那四种烹饪类型（Mod 侧 MUST_HAVE_DURATION 的定义）
-    // 只要在这个包里存在，就必须 100% 读到耗时。
-    const MUST_HAVE_DURATION = [
-      "minecraft:smelting",
-      "minecraft:blasting",
-      "minecraft:smoking",
-      "minecraft:campfire_cooking",
-    ];
-    const guaranteed = coverage.durationTypes.filter((t) => MUST_HAVE_DURATION.includes(t.type));
-    const broken = guaranteed.filter((t) => t.withDuration !== t.total);
-    check(
-      "原版烹饪类型（熔炼/高炉/烟熏/营火）只要有配方就是满覆盖",
-      broken.length === 0,
-      broken.length > 0
-        ? broken.map((t) => `${t.type} ${t.withDuration}/${t.total}`).join("、")
-        : `核对到 ${guaranteed.length} 种：${guaranteed.map((t) => `${t.type} ${t.withDuration}/${t.total}`).join("、")}`,
-    );
-    // 一种都没核对到 = 烹饪适配器整个没生效。这不该在任何有熔炉配方的包里发生，
-    // 所以判失败而不是跳过 —— 「没验到」和「验过了」必须分得开。
-    // （注意类型列表会被截断，所以用 durationTypeCount 判断而不是列表长度。）
-    check(
-      "至少核对到一种原版烹饪类型（否则烹饪适配器没生效）",
-      guaranteed.length > 0,
-      `带耗时的类型共 ${coverage.durationTypeCount} 种，列表已截断时烹饪类型也可能没被列出来`,
-    );
+    // 真正可靠的判据在下面：**逐条核对真实配方**。那一段会按探针物品把四种烹饪类型的
+    // 真配方捞出来，逐条断言耗时非 null —— 那才是「适配器有没有生效」的直接证据，
+    // 而且不依赖任何列表是否被截断。
   }
 
   // ---- 再逐条核对真实配方的字段值 ----
