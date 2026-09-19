@@ -11,6 +11,7 @@
 
 import { BridgeClient } from "./bridge.js";
 import { RecipeStore } from "./cache.js";
+import { computeFieldCoverage, renderFieldCoverage } from "./report.js";
 import { BridgeHttpError, type RegistryPage } from "./types.js";
 
 /** 多久探测一次 Bridge 的状态。太短会浪费请求，太长会让配方重载后反应迟钝。 */
@@ -123,6 +124,10 @@ export function describeStatus(store: RecipeStore, location: string): string {
     lines.push(`- 配方 ${s.recipeCount} 条，标签 ${s.tagCount} 个`);
     lines.push(`- 数据版本 dataVersion = ${s.dataVersion}（配方重载时会自动重建缓存）`);
   }
+
+  // 字段覆盖度。放在这里是因为它是**产线计算能不能信**的前提：
+  // 没有耗时的配方算不出机器数。见 report.ts 里 computeFieldCoverage 的说明。
+  lines.push(...renderFieldCoverage(computeFieldCoverage(store.allRecipes())));
 
   lines.push("");
   lines.push(`- Bridge 地址：${location}`);

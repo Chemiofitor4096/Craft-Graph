@@ -10,6 +10,82 @@
 import type { RecipeStore, StackKind } from "./cache.js";
 import type { ProductionPlan } from "./plan.js";
 import { flattenTree, type NodeKind, type TreeResult, type TreeNode } from "./tree.js";
+import type { Recipe } from "./types.js";
+
+/**
+ * 字段覆盖度：`duration` / `machine` 各有多少条配方读到了。
+ *
+ * <h2>为什么这个统计必须出现在 agent 看得到的地方</h2>
+ *
+ * 这两个字段曾经在 1290 条真实配方上**全是 null** —— 原版通用接口给不出它们，
+ * 而没人去读各配方类自己的字段。后果是 `calculate_production_plan`
+ * 每个环节都报「手工」，机器数计算整个失效。
+ *
+ * 它藏了很久的原因值得记住：41 项算法测试 + 83 个 JUnit 用例 + 17 项契约测试
+ * **全部通过**，因为夹具里手写了 duration，而没有任何一层断言过真数据里的这两个字段。
+ *
+ * 所以现在它们出现在 `get_bridge_status` 里：agent 每次排查问题都会看到，
+ * 也就能据此告诉玩家「机器数只对熔炼那部分配方有效」，
+ * 而不是拿一份看起来完整、实际只有 8.7% 覆盖的数据去规划产线。
+ */
+export interface FieldCoverage {
+  total: number;
+  withDuration: number;
+  withMachine: number;
+  /** 有耗时数据的配方类型，按类型 id 排序 */
+  durationTypes: { type: string; withDuration: number; total: number }[];
+}
+
+export function computeFieldCoverage(recipes: Recipe[]): FieldCoverage {
+  // 两个 map 分开数，一遍扫完。刻意不用「遇到有耗时的条目才建桶」那种写法 ——
+  // 那样桶里的 total 会取决于配方出现的顺序，把覆盖率算得比实际好看，
+  // 而「算得比实际好看」正是这类统计最危险的失效方式。
+  const totals = new Map<string, number>();
+  const durations = new Map<string, number>();
+  let withDuration = 0;
+  let withMachine = 0;
+
+  for (const r of recipes) {
+    totals.set(r.type, (totals.get(r.type) ?? 0) + 1);
+    if (r.duration != null) {
+      withDuration++;
+      durations.set(r.type, (durations.get(r.type) ?? 0) + 1);
+    }
+    if (r.machine != null) withMachine++;
+  }
+
+  return {
+    total: recipes.length,
+    withDuration,
+    withMachine,
+    durationTypes: [...durations.entries()]
+      .map(([type, withDur]) => ({ type, withDuration: withDur, total: totals.get(type) ?? withDur }))
+      .sort((a, b) => a.type.localeCompare(b.type)),
+  };
+}
+
+/** 覆盖度渲染成给 AI 看的几行。类型列表会截断 —— 大整合包里可能有几十种带耗时的类型。 */
+export function renderFieldCoverage(c: FieldCoverage, maxTypes = 8): string[] {
+  if (c.total === 0) return [];
+  const pct = (n: number) => ((n * 100) / c.total).toFixed(1);
+  const lines = [
+    `- 字段覆盖：耗时 ${c.withDuration}/${c.total}（${pct(c.withDuration)}%）· ` +
+      `机器 ${c.withMachine}/${c.total}（${pct(c.withMachine)}%）`,
+  ];
+
+  if (c.withDuration < c.total) {
+    lines.push(
+      "  没有耗时的配方**无法计算机器数**，`calculate_production_plan` 会把它们按「手工」处理。" +
+        "这是数据本身的限制（原版只有熔炼类配方带耗时），不是查询出错。",
+    );
+  }
+  if (c.durationTypes.length > 0) {
+    const shown = c.durationTypes.slice(0, maxTypes).map((t) => `${t.type} ${t.withDuration}/${t.total}`);
+    const more = c.durationTypes.length > maxTypes ? `，等 ${c.durationTypes.length} 种` : "";
+    lines.push(`  带耗时的类型：${shown.join("、")}${more}`);
+  }
+  return lines;
+}
 
 function name(store: RecipeStore, id: string): string {
   const display = store.itemName(id);
