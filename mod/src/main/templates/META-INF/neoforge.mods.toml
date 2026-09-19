@@ -6,7 +6,8 @@ license = "${mod_license}"
 modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
-authors = "${mod_authors}"
+# 署名含中文，所以写在这里而不是 gradle.properties（那个文件是 ISO-8859-1 读的）。
+authors = "Luzzi（辛六子）"
 # 中文描述写在这里，不放在 gradle.properties。
 #
 # 原因：Gradle 按 ISO-8859-1 读取 gradle.properties（为保证向后兼容，是既定行为），

@@ -165,6 +165,13 @@ publishing {
                         name = mod_license
                     }
                 }
+                developers {
+                    developer {
+                        // build.gradle 是 UTF-8 读的（不同于 gradle.properties 的 ISO-8859-1），
+                        // 所以这里可以用中文。
+                        name = 'Luzzi（辛六子）'
+                    }
+                }
             }
         }
     }
