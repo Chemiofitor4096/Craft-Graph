@@ -1,0 +1,119 @@
+// CraftGraph Bridge Mod —— 构建配置
+//
+// 结构基本沿用官方 MDK（NeoForgeMDKs/MDK-1.21.1-ModDevGradle），
+// 只去掉了数据生成器和发布相关的部分。要用时可以从 MDK 抄回来。
+
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.147'
+    id 'idea'
+}
+
+tasks.named('wrapper', Wrapper).configure {
+    distributionType = Wrapper.DistributionType.BIN
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// 1.21.1 用 Java 21
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    // EMI / JEI 是软依赖，编译期需要它们的 API。开启时取消注释：
+    //
+    // EMI（客户端模组，Maven 坐标见 https://modrinth.com/mod/emi）
+    // maven { url = 'https://maven.terraformersmc.com/releases/' }
+    //
+    // JEI
+    // maven { url = 'https://maven.blamejared.com/' }
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+
+    mods {
+        // 这一句把主源码集注册成 mod 的内容来源。名字必须和 mod_id 一致。
+        craftgraph {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// 把 gradle.properties 里的 mod 元信息注入到 neoforge.mods.toml。
+// 这样版本号等信息只有一处定义，不用改两个地方。
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+// ---------------------------------------------------------------- 测试
+//
+// 绝大部分桥接逻辑刻意做成不依赖 Minecraft 的纯 Java（见 snapshot 包），
+// 这样倒排索引、查询、HTTP 服务都能用普通 JUnit 测，不需要启动游戏。
+// 只有 extract 包真正需要游戏，那部分只能靠编译 + 进游戏验证。
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.14.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // ModDevGradle 把 Minecraft 那套依赖（含 Gson）只加到主源码集的类路径上，
+    // 测试默认看不到，所以要显式声明。
+    //
+    // 版本必须和游戏实际用的一致（1.21.1 是 2.10.1，由 Minecraft 的 strictly 约束锁定）。
+    // 用别的版本会掩盖真实问题 —— JsonTest 的意义正是验证「游戏自带的那版 Gson
+    // 支持 record 和 serializeNulls」，换一个版本去测等于没测。
+    // 升级 Minecraft 时用 gradlew dependencies --configuration compileClasspath 核对。
+    testImplementation 'com.google.code.gson:gson:2.10.1'
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat = 'full'
+        showStandardStreams = false
+    }
+}
