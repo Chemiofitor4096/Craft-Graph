@@ -1,5 +1,6 @@
 /**
- * 格式对比：验证「紧凑文本 + Schema 外置 + 字典编码」（doc/raw-form.md 的方案）
+ * 格式对比：验证「紧凑文本 + Schema 外置 + 字典编码」这一紧凑格式提案是否真的省 token。
+ * 结论见 doc/format-evaluation.md。
  * 对这个项目到底能省多少 token。
  *
  * 三个关键的方法论要求，否则结论会失真：
