@@ -1,0 +1,233 @@
+# 开发文档
+
+面向要改这个项目的人。用户向的介绍在 [README](../README.md)。
+
+- [仓库结构](#仓库结构)
+- [开发环境](#开发环境)
+- [测试：四层验证](#测试四层验证)
+- [跨语言契约验证怎么做的](#跨语言契约验证怎么做的)
+- [真实数据暴露的问题](#真实数据暴露的问题)
+- [token 开销](#token-开销)
+- [踩过的坑](#踩过的坑)
+
+---
+
+## 仓库结构
+
+| 目录 | 内容 |
+|---|---|
+| `doc/protocol.md` | **Bridge HTTP API 契约** —— 两侧唯一的约定，改代码前先看这个 |
+| `doc/decisions.md` | 已锁定的技术决策及其代价 |
+| `doc/format-evaluation.md` | 输出格式的实测评估（含对紧凑 DSL 方案的评估） |
+| `mcp-server/` | TypeScript MCP 服务器：工具定义、配方树、产线计算 |
+| `mod/` | NeoForge 桥接 Mod：读配方、建索引、暴露本地 HTTP |
+| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Mod 测试生成（不提交） |
+
+`mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开，不需要仓库里其他部分。
+
+## 开发环境
+
+| 组件 | 要求 | 说明 |
+|---|---|---|
+| Java | 21 | NeoForge 1.21.1 要求。toolchain 会从 PATH 找，不需要设 `JAVA_HOME` |
+| Node.js | ≥ 20 | MCP Server 侧 |
+| Gradle | 不需要安装 | `mod/gradlew` 已生成 |
+
+```bash
+cd mcp-server && npm install
+cd ../mod && ./gradlew build
+```
+
+## 测试：四层验证
+
+```bash
+# MCP Server（TypeScript）
+cd mcp-server
+npm run typecheck    # 类型检查
+npm run smoke        # 算法层：索引、标签挑选、合并槽位、循环检测、离线降级
+npm run e2e          # 协议层：真实 stdio 握手 + 工具调用
+npm run contract     # 跨语言契约：吃 Java 侧的真实输出
+npm run live         # ★ 对运行中的真实游戏做体检（需 Minecraft 已启动并进入世界）
+npm run measure      # token 测量（1 万条配方合成数据）
+npm run compare      # 格式对比：markdown / 列式 TSV / 字典编码
+npm run analyze      # 输出成本分解 + 索引查询延迟
+npm run inspect      # 配方覆盖度诊断：哪些配方类型读不懂、为什么
+
+# Bridge Mod（Java）—— 不需要启动 Minecraft
+cd ../mod
+./gradlew test
+./gradlew build
+./gradlew runClient   # 启动带 Mod 的游戏
+```
+
+四层各自负责不同的东西，**都不能省**：
+
+| 层 | 数据来源 | 能发现什么 |
+|---|---|---|
+| `smoke` / JUnit | 手写夹具 | 算法逻辑、边界情况 |
+| `e2e` | 自建假 Bridge | MCP 协议本身（握手、工具 schema、错误码） |
+| `contract` | Java 导出的真实响应体 | 两侧字段与 `null` 处理是否一致 |
+| **`live`** | **运行中的真游戏** | **真实配方形状、真实标签规模、真机 token 消耗** |
+
+`live` 是唯一跑在真实数据上的，也是唯一发现过「我的假设错了」这类问题的层。
+它刻意**不配置任何环境变量**，靠 `~/.craftgraph/bridge.json` 自己发现游戏 ——
+顺带验证了服务发现机制本身。
+
+### 一个必须知道的顺序依赖
+
+`npm run contract` 消费的样本由 Mod 的 `ContractDumpTest` 生成（`./gradlew test`）。
+所以在新克隆的仓库上要按这个顺序：
+
+```bash
+cd mod && ./gradlew test        # 先：生成契约样本
+cd ../mcp-server && npm run contract
+```
+
+样本本身**不提交**（是生成物）。`contract.ts` 会检查样本是否比 Java 源码旧，
+过期时在开头和结论处各提醒一次 —— 「用旧样本跑出的全绿」是最危险的假通过。
+缺少样本时会给出明确的补跑提示。
+
+### 测量脚本的缓存隔离
+
+所有生成合成数据的脚本（`measure` / `compare` / `analyze`）都把缓存写到各自的独立目录，
+**绝不碰 `~/.craftgraph/cache`**。这不是洁癖：它们曾经污染过真实缓存，
+后果是之后游戏没开时做离线查询，会把合成数据当成真数据返回，而且报告看起来完全正常。
+
+## 跨语言契约验证怎么做的
+
+两侧一直是各自对着假数据开发的：TypeScript 侧用手写的假 Bridge，Java 侧用自己的内存数据。
+**它们从没真正对过话。** 两边都照着 `protocol.md` 写，但契约本身没被跑通过 ——
+字段名差一个字母、`null` 处理不一致，都要等进游戏同时调两个系统时才发现，而且极难定位。
+
+做法：
+
+1. `ContractDumpTest` 把 Java 侧**真实的 HTTP 响应体**写到 `shared/fixtures/bridge-dump/`，
+   覆盖易错形态：`null` 字段、概率产出、opaque 配方、流体、中文显示名
+2. `npm run contract` 用这些样本回放出一个 Bridge，让整条链路
+   （HTTP 客户端 → 索引 → 配方树 → 产线 → 报告）跑在**真实字节**上，
+   并断言两侧对同一份数据得出一致的结论
+
+它顺带是「金标准样本」：那批 JSON 就是 Java 实际会发出的东西，可以直接拿来看。
+
+## 真实数据暴露的问题
+
+第一次在真实 Minecraft 里跑通之后（1290 条配方、opaque 2%、主线程抽取 27ms），
+`live` 抓到三个假数据发现不了的问题。记在这里，因为它们都是**只有真实数据才会触发**的类型。
+
+### 一、原版有序合成导致重复子树（还算错了数量）
+
+原版把「3 个铁锭」表示成 **3 个各含 1 个铁锭的槽位**，于是铁镐的配方树里出现三棵
+一模一样的「铁锭」分支。这不只是多花两三倍 token —— **它还算错了数量**：
+每个槽位各自向上取整，1 个火把需要的基础原料被算成 3 个原木，而正确答案是 1 个
+（1 原木 → 4 木板 → 4 木棍 → 4 火把）。
+
+修法是在**递归前按物品合并槽位**，不是事后去重 —— 合并后只取整一次，数量才准。
+见 `mcp-server/src/resolution.ts` 的 `mergeInputs`。
+
+### 二、标签成员挑选反直觉
+
+原来按字典序挑，实测挑出 `charcoal`（煤炭标签里 `"charcoal" < "coal"`）、
+`acacia_planks`（橡木标签里 acacia 字母序最前）。
+
+改成**优先短 id**：模组给基础物品加前缀后缀来造变体（橡木→金合欢木、煤炭→木炭），
+所以基础物品的 id 通常最短。三个案例因此全部改对。见 `pickCanonical`。
+
+### 三、`mcVersion` 报成了 NeoForge 版本
+
+`Minecraft.getInstance().getLaunchedVersion()` 返回的是启动参数里的 `--version`，
+而开发环境（`runClient`）下那个值是 NeoForge 的版本号，不是 Minecraft 版本。
+改用 `SharedConstants.getCurrentVersion().getName()`。
+
+### 四、读不懂的配方里混着一个我们自己的 bug
+
+`inspect` 显示 29 条 opaque，其中 18 条是盔甲纹饰锻造。读反编译源码后发现是两个原因：
+
+- **输入读不到 —— Minecraft 的真实限制。** `SmithingRecipe` 不覆盖 `getIngredients()`，
+  继承的默认实现返回空列表，槽位信息藏在 `isTemplateIngredient` 这类谓词里。
+- **产出读不到 —— 我们的 bug。** `SmithingTrimRecipe.getResultItem` 明明会返回正常产物，
+  但它要查 `Registries.TRIM_PATTERN`，而我们传了 `null` → NPE → 被 `catch (Throwable)` 吞掉。
+
+**修复时差点踩进一个陷阱**：如果只把 `null` 换成真实注册表，锻造配方会变成
+「有产出、无输入、`opaque: false`」——也就是看起来像「纹饰不需要任何材料」。
+那正是 `opaque` 设计要防的静默错误答案。所以判定规则同时覆盖两头，
+抽成了独立的 `Readability` 类并单独测试。
+
+顺带堵上了「静默吞异常」：`getResultItem` 的失败现在会计数并打 WARN 日志。
+**这个 bug 藏这么久，就是因为异常被无声吞掉了。**
+
+### 共同点
+
+四个都不是逻辑错误，而是**「我对真实数据的假设错了」**。假数据是按我的理解造的，
+所以测不出我的理解有偏差 —— 这就是为什么必须有 `live` 这一层。
+
+## token 开销
+
+MCP 工具的返回值会进模型上下文，所以**输出大小就是成本**。有两套测量：
+`measure` 用 1 万条配方的合成数据（压规模），`live` 用真实游戏（看实际）。
+
+真实数据（近原版 1290 条配方）上的一次体检：
+
+| 项目 | tokens |
+|---|---:|
+| `search_items`（中文搜索） | 25 |
+| `list_recipe_types` | 131 |
+| `build_recipe_tree`（火把 / 铁镐 / 金苹果） | 433 / 444 / 289 |
+| `calculate_production_plan`（每分钟 60 火把） | 522 |
+| `expand_tag`（`#minecraft:planks`） | 283 |
+| `get_recipes_for_input`（铁锭能做什么） | 833 |
+| 工具定义（固定开销，每次会话） | 2,598 |
+
+配方树在真实数据上是 **300~450 tokens** 量级 —— 比合成深链小一个数量级。
+真实查询本来就浅，加上默认只展示三层，多数情况下碰不到成本上限。
+
+合成数据下的优化前后对比（318 节点的深链）：
+
+| 项目 | 优化前 | 现在 | 变化 |
+|---|---:|---:|---:|
+| 配方树（完全展开） | 15,585 | 1,855 | **-88%** |
+| 产线规划 | 20,304 | 6,832 | **-66%** |
+| 典型会话 | 16,861 | 3,131 | **-81%** |
+| 最坏会话 | 37,350 | 10,148 | **-73%** |
+
+两项关键设计：
+
+- **分层返回**：配方树默认只展开到第 3 层，更深的分支用「⋯」标出节点数和原料，
+  但**基础原料永远是全树算出来的**。agent 既能拿到完整答案，又不用为几百个节点付 token。
+  这是贡献最大的一项，远超格式改动。
+- **`format` 三选一**：`markdown`（默认）、`tsv`（列式，省 17~26%）、`json`（最贵但结构完整）
+
+格式选型的实测结论见 [`format-evaluation.md`](format-evaluation.md)。
+核心发现：**字典编码的收益在每次调用都要重发字典时会完全蒸发**；真正值钱的是「少返回」。
+
+**改渲染逻辑后跑一遍 `measure` 就知道有没有变贵。** 加输出前先量一下。
+
+## 踩过的坑
+
+### Gradle 按 ISO-8859-1 读 `gradle.properties`
+
+那里写非 ASCII 字符会变成乱码，而且这个值会被展开进 `neoforge.mods.toml` ——
+症状是**游戏里的 Mod 描述显示成一堆 `æè¿è¡ä¸ç Minecraft...`**。
+
+所以中文描述写在 `mod/src/main/templates/META-INF/neoforge.mods.toml`（UTF-8），
+`generateModMetadata` 里显式设了 `filteringCharset = 'UTF-8'`。
+
+### 行尾：`.gitattributes` 统一为 LF
+
+仓库里原本混着 CRLF（Windows 上写出来的）和 LF（工具生成的），
+`mod/build.gradle` 甚至文件内部就是混的。后果是任何跨平台编辑都会让整个文件显示为已修改，
+几百行的假 diff 会把真正的改动埋掉。
+
+现在仓库内统一按 LF 存储，两个例外：`*.bat` 检出为 CRLF（某些 cmd.exe 解析 LF 结尾会出错），
+`gradlew` / `*.sh` 锁定 LF（CRLF 会让 Linux/macOS 报 `bad interpreter: /bin/sh^M`，
+而报错完全不提行尾）。
+
+### 发布凭据守卫放在 `doFirst` 里
+
+放在配置阶段的话，没设环境变量连 `./gradlew build` 都跑不起来 ——
+而日常构建根本不需要发布凭据。另外凭据用空串兜底而不是 `null`：
+`null` 会让 Gradle 在任务配置校验阶段就失败，报的是
+`credentials.username doesn't have a configured value`，**不会告诉你要设哪两个环境变量**。
+
+### 测试脚本的缓存目录必须隔离
+
+见上面「测量脚本的缓存隔离」。这条是花了代价学到的。
