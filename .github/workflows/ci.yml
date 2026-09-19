@@ -34,9 +34,29 @@ jobs:
       - name: 配置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
 
+      # 这道检查是有来历的：gradlew 曾经以 100644（不可执行）提交进仓库，
+      # CI 报的是 "./gradlew: Permission denied" —— 和代码毫无关系，很难往这边想。
+      #
+      # 根因是 Windows 上 core.filemode=false：git 完全忽略工作区的权限位，
+      # 所以 git add 永远不会把 gradlew 变成可执行，必须用 update-index 直接改索引。
+      #
+      # 与其在 CI 里 chmod +x 掩盖过去（那样 Linux/macOS 用户克隆后仍然会踩），
+      # 不如在这里明确失败并给出修复命令。
+      - name: 检查 gradlew 可执行位
+        run: |
+          if [ ! -x mod/gradlew ]; then
+            echo "::error::mod/gradlew 在 git 里不是可执行文件（应为 100755）。"
+            echo "::error::Linux/macOS 上克隆后 ./gradlew 会 Permission denied。"
+            echo "::error::修复：git update-index --chmod=+x mod/gradlew 然后提交。"
+            echo "::error::注意：Windows 上 core.filemode=false，git add 检测不到权限变化，提交前也不要 reset。"
+            exit 1
+          fi
+
+      # 这里只跑 build：它依赖 check，check 依赖 test，所以测试包含在内。
+      # 这个 Mod 的测试不需要启动 Minecraft，CI 里跑得动。
       - name: 构建与测试
         working-directory: mod
-        run: ./gradlew build test --no-daemon --stacktrace
+        run: ./gradlew build --no-daemon --stacktrace
 
       # 契约样本由 ContractDumpTest 生成，交给下面的 contract job 使用。
       # 它刻意不提交进仓库（生成物），所以必须在这里显式传递。
