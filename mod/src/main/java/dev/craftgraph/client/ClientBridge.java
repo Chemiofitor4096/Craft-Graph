@@ -9,6 +9,7 @@ import dev.craftgraph.bridge.BridgeInfo;
 import dev.craftgraph.bridge.BridgeService;
 import dev.craftgraph.bridge.DiscoveryFile;
 import dev.craftgraph.bridge.MainThreadDispatcher;
+import dev.craftgraph.extract.FieldCoverage;
 import dev.craftgraph.extract.RecipeExtractor;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
@@ -247,6 +248,30 @@ public final class ClientBridge {
                     LOGGER.warn("CraftGraph 有 {} 条配方的 getResultItem 抛了异常，"
                                     + "它们的产出会被当作读不到。这是个 bug 信号，不是正常情况。",
                             extractor.resultItemFailures());
+                }
+
+                if (extractor.toastSymbolFailures() > 0) {
+                    LOGGER.warn("CraftGraph 有 {} 条配方的 getToastSymbol 抛了异常，"
+                                    + "这些配方的机器会推断不出来。这是个 bug 信号，不是正常情况。",
+                            extractor.toastSymbolFailures());
+                }
+
+                // 字段覆盖度。duration / machine 曾经在真实数据里**全是 null**
+                // 而四个测试层都没发现（夹具里手写了 duration），
+                // 代价是产线计算的机器数整个失效了很久。所以这两个字段的覆盖度必须每次都报出来。
+                FieldCoverage coverage = extractor.coverage();
+                LOGGER.info("CraftGraph 字段覆盖度：{}", coverage.summary());
+                if (coverage.withDuration() > 0) {
+                    LOGGER.info("CraftGraph 带耗时数据的配方类型：{}",
+                            String.join("、", coverage.typesWithDuration()));
+                }
+
+                // 「本该有耗时却没读到」= 适配器没生效，不是数据缺失。
+                // 这条判据与适配器实现无关（写死的是 Minecraft 的事实），所以它抓的是真问题。
+                for (String broken : coverage.brokenTypes()) {
+                    LOGGER.warn("CraftGraph 字段覆盖度异常：{}。这些类型的耗时是平台保证有的，"
+                                    + "读到 null 更可能是解析出了问题而不是数据缺失 —— "
+                                    + "产线计算会把它们当成手工。", broken);
                 }
 
                 if (opaque > 0) {

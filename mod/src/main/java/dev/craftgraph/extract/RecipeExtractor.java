@@ -38,6 +38,16 @@ import java.util.Set;
  * 但**语义**不能 —— 比如「Ingredient.getItems() 返回的到底是不是标签成员」。
  * 把语义判断集中到可测试的地方，这里剩下的就只是搬运。
  *
+ * <h2>类型特有的字段交给 {@code extract} 包里的适配器</h2>
+ *
+ * 通用接口只给得出输入和产出。{@code duration} / {@code machine} 藏在各配方类自己的字段里，
+ * 需要知道「这是哪种配方」才读得到 —— 见 {@link RecipeAdapters} 与 {@link MachineTable}。
+ *
+ * <p>这两个字段曾经恒为 null（压根没人去读），而四个测试层全绿，
+ * 因为夹具里手写了 duration。症状是产线计算里每个环节都报「手工」。
+ * 所以除了补上读取逻辑，还加了 {@link FieldCoverage}：
+ * **任何下游要用的字段，都必须有一处的覆盖度是可观测的。**
+ *
  * <h2>仍然需要进游戏验证的部分</h2>
  *
  * 下面这些假设编译器验证不了，第一次进游戏时要重点看：
@@ -48,9 +58,12 @@ import java.util.Set;
  *   <li>{@code Ingredient#getItems()} 对「任意物品」这类槽位会不会返回上千项
  *       （{@link IngredientNormalizer#MAX_UNEXPLAINED_OPTIONS} 会把它判成读不懂）</li>
  *   <li>配方数量是否符合预期（跟 JEI/EMI 显示的数量对比）</li>
+ *   <li>{@code instanceof AbstractCookingRecipe} 是否真的匹配那 4 种烹饪配方 ——
+ *       这是 {@link CookingAdapter} 唯一的判据，而它需要真实的 MC 类才能验证，
+ *       所以由 {@code npm run live} 在真游戏上断言。见 {@link FieldCoverage#brokenTypes()}</li>
  * </ul>
  *
- * 这些失败都会体现在 {@code opaque} 比例上，不会静默出错 —— 这是刻意设计的。
+ * 这些失败都会体现在 {@code opaque} 比例或字段覆盖度上，不会静默出错 —— 这是刻意设计的。
  */
 public final class RecipeExtractor {
 
@@ -73,6 +86,12 @@ public final class RecipeExtractor {
 
     /** getResultItem 抛异常的配方数。可见性很重要，见 Registries 字段的说明。 */
     private int resultItemFailures;
+
+    /** getToastSymbol 抛异常的配方数。正常应为 0。 */
+    private int toastSymbolFailures;
+
+    /** 字段覆盖度。由 ClientBridge 打进日志 —— 「字段悄悄全是 null」必须留下痕迹。 */
+    private final FieldCoverage coverage = new FieldCoverage();
 
     private RecipeExtractor(TagIndex itemTags, TagIndex fluidTags, HolderLookup.Provider registries) {
         this.itemTags = itemTags;
@@ -176,6 +195,16 @@ public final class RecipeExtractor {
         // 「有产出、无输入、opaque=false」，看起来像「纹饰不需要材料」，那是静默的错误答案。
         opaque = Readability.isOpaque(inputs, outputs, opaque);
 
+        // 类型特有的字段：耗时、机器。之前这两个恒为 null —— 通用接口给不出它们，
+        // 而没有人去读各配方类自己的字段。症状是产线计算里每个环节都报「手工」。
+        Integer duration = RecipeAdapters.duration(recipe);
+        String machine = MachineTable.machineFor(typeId, toastItemId(recipe));
+
+        // 记一份覆盖度，由 ClientBridge 打进日志。没有适配器匹配的字段恒为 null，
+        // 而 null 会被产线计算当作「未知」——所以「哪些类型一条都没读到」必须留下痕迹，
+        // 不能只靠单元测试（它们跑在夹具上，发现不了真实数据的形状）。
+        coverage.record(typeId, duration != null, machine != null);
+
         return new Models.Recipe(
                 id.toString(),
                 typeId,
@@ -184,11 +213,31 @@ public final class RecipeExtractor {
                 List.copyOf(outputs),
                 List.of(),   // fluidOutputs：需要流体槽位的配方类型适配器，MVP 先留空
                 List.of(),   // chanceOutputs：概率产出需要按配方类型适配，MVP 先留空
-                null,        // machine：原版 API 拿不到，接 EMI 后补
-                null,        // duration：同上
-                null,        // energy：同上
+                machine,
+                duration,
+                null,        // energy：原版确实没有这个数据，只能靠 EMI 或模组适配器。
+                             // **不要伪造** —— 编一个能耗数字比 null 危险得多。
                 "vanilla",
                 opaque);
+    }
+
+    /**
+     * {@code getToastSymbol()} 返回的物品 id，作为机器推断的输入。
+     *
+     * <p>取不到（空栈）时返回 null —— 很多模组配方返回 {@code ItemStack.EMPTY}。
+     * 保留 catch：个别模组实现这里会抛异常，不能让一条坏配方带崩整个快照构建
+     * （那会让整个桥接不可用）。失败会被计数并打日志，不静默。
+     */
+    private String toastItemId(Recipe<?> recipe) {
+        try {
+            ItemStack toast = recipe.getToastSymbol();
+            if (toast == null || toast.isEmpty()) return null;
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(toast.getItem());
+            return itemId == null ? null : itemId.toString();
+        } catch (Throwable t) {
+            this.toastSymbolFailures++;
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- 小工具
@@ -226,6 +275,16 @@ public final class RecipeExtractor {
     /** getResultItem 抛异常的配方数。正常应为 0。 */
     public int resultItemFailures() {
         return resultItemFailures;
+    }
+
+    /** getToastSymbol 抛异常的配方数。正常应为 0。 */
+    public int toastSymbolFailures() {
+        return toastSymbolFailures;
+    }
+
+    /** 字段覆盖度。每次 {@link #extractAll} 后读一次，打进日志。 */
+    public FieldCoverage coverage() {
+        return coverage;
     }
 
     private static Models.ItemStack toItemStack(ItemStack stack) {
