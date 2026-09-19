@@ -78,19 +78,23 @@ Handled deliberately, because they are where naive tools produce wrong answers:
 
 ## Install
 
-> **Status:** the mod and the server are not yet published to Modrinth / CurseForge / npm.
-> For now, build both from source — it takes about two minutes.
+Two halves, and **you need both** — the jar alone cannot answer anything, because all the
+recipe-tree and planning logic lives in the server.
+
+**1. The mod** — download `craftgraph-<version>.jar` from the
+[Releases page](https://github.com/Chemiofitor4096/Craft-Graph/releases) and put it in your
+mods folder. No release for your version? Build it yourself:
 
 ```bash
 git clone https://github.com/Chemiofitor4096/Craft-Graph.git
-cd craftgraph
-
-# 1. Build the mod and put the jar in your mods folder
-cd mod && ./gradlew build
+cd Craft-Graph/mod && ./gradlew build
 # → mod/build/libs/craftgraph-*.jar  →  put it in .minecraft/mods/
+```
 
-# 2. Build the MCP server
-cd ../mcp-server && npm install && npm run build
+**2. The MCP server** — not published to npm yet, so build it from source:
+
+```bash
+cd Craft-Graph/mcp-server && npm install && npm run build
 ```
 
 Then point your AI client at `mcp-server/dist/index.js`. For Claude Code:
@@ -100,7 +104,7 @@ Then point your AI client at `mcp-server/dist/index.js`. For Claude Code:
   "mcpServers": {
     "craftgraph": {
       "command": "node",
-      "args": ["/absolute/path/to/craftgraph/mcp-server/dist/index.js"]
+      "args": ["/absolute/path/to/Craft-Graph/mcp-server/dist/index.js"]
     }
   }
 }

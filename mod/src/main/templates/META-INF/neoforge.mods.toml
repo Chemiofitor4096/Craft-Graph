@@ -21,7 +21,12 @@ description = '''把运行中的 Minecraft 配方数据通过本地 HTTP 暴露�
 [[dependencies.${mod_id}]]
 modId = "neoforge"
 type = "required"
-versionRange = "${neo_version}"
+# 必须是 [版本,) 区间写法，不能只写版本号。
+#
+# 只写 "21.1.251" 就丢掉了「或更新」这层意思，而 NeoForge 21.1.x 是持续发版的
+# （21.1.251 之后还会有新版），README 也承诺支持 21.1.x。官方 MDK 用的就是
+# 这个区间写法。
+versionRange = "[${neo_version},)"
 ordering = "NONE"
 side = "CLIENT"
 
