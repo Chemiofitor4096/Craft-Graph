@@ -171,6 +171,7 @@ class of threading bugs.
 
 | Document | Contents |
 |---|---|
+| [`AGENTS.md`](AGENTS.md) | Instructions for AI coding agents working in this repo — what to read first and the rules that prevent silently wrong answers |
 | [`doc/protocol.md`](doc/protocol.md) | The bridge HTTP contract — the single source of truth for both halves |
 | [`doc/decisions.md`](doc/decisions.md) | Locked technical decisions and what changing them would cost |
 | [`doc/development.md`](doc/development.md) | Dev setup, the four test layers, token measurements, lessons learned |

@@ -162,6 +162,7 @@ Minecraft 1.21.1 + 你的整合包
 
 | 文档 | 内容 |
 |---|---|
+| [`AGENTS.md`](AGENTS.md) | 给在这个仓库里干活的 AI 的说明 —— 先读什么、以及哪些规则违反了会出静默错误答案 |
 | [`doc/protocol.md`](doc/protocol.md) | Bridge HTTP 契约 —— 两侧唯一的约定 |
 | [`doc/decisions.md`](doc/decisions.md) | 已锁定的技术决策，以及改动它们要付什么代价 |
 | [`doc/development.md`](doc/development.md) | 开发环境、四层测试、token 测量、踩过的坑 |
