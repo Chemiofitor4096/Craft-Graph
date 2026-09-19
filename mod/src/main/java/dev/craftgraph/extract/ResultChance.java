@@ -68,4 +68,31 @@ public final class ResultChance {
         if (chance >= 1f) return Kind.GUARANTEED;
         return Kind.PROBABILISTIC;
     }
+
+    /**
+     * 按权重归一化后分类：概率 = 权重 / 权重和。
+     *
+     * <p>Create 的 {@code sequenced_assembly} 用的是权重而不是概率 ——
+     * 实测那条精准机械动力的池子是 {@code [120, 8, 8, 5, 3, 2, 2, 1, 1]}，
+     * 权重和 150，所以产出概率是 120/150 = 80%，其余按比例是废料。
+     * Create 自己的 {@code getOutputChance()} 算的就是这个式子。
+     *
+     * <p>抽成纯函数是因为它有真实的边界，而且**错了不会报错**：
+     *
+     * <ul>
+     *   <li><b>权重和 ≤ 0 → {@link Kind#NEVER}。</b>没法归一化。返回「必然」会让
+     *       每条产出都变成 100%，返回「概率」会得到除零后的 Infinity。</li>
+     *   <li><b>权重是 Infinity → {@link Kind#GUARANTEED}。</b>{@code Inf / 有限和} = Inf，
+     *       经 {@link #classify} 判为必然。这是对的：一个无限大的权重本来就压过所有其他条目。</li>
+     *   <li><b>权重是 NaN → {@link Kind#GUARANTEED}。</b>NaN 参与除法仍是 NaN，
+     *       同 {@link #classify} 的处理：不丢数据优先。</li>
+     *   <li><b>池子里只有一项 → 概率恰好 1.0 → 必然产出。</b>
+     *       这一条很重要：{@code sturdy_sheet} / {@code track} 的池子只有一项，
+     *       它们其实是必然产出，不该走 {@code chanceOutputs} 被下游按期望值算。</li>
+     * </ul>
+     */
+    public static Kind classifyWeight(float weight, float totalWeight) {
+        if (totalWeight <= 0f) return Kind.NEVER;
+        return classify(weight / totalWeight);
+    }
 }

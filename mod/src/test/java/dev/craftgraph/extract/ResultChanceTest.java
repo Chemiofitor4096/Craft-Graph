@@ -71,4 +71,57 @@ class ResultChanceTest {
             org.junit.jupiter.api.Assertions.assertNotNull(k, "classify(" + s + ") 返回了 null");
         }
     }
+
+    // ---------------------------------------------------------------- 权重归一化
+    //
+    // 这一组覆盖 Create 的 sequenced_assembly：它的 chance 是**权重不是概率**。
+    // 数值全部来自真实配方数据。
+
+    @Test
+    @DisplayName("★ 精准机械动力的权重池：120/150 → 概率产出")
+    void realPrecisionMechanismPool() {
+        // 实测池子 [120, 8, 8, 5, 3, 2, 2, 1, 1]，权重和 150。
+        // 主产物 120/150 = 80%，其余是按比例的废料。
+        assertEquals(ResultChance.Kind.PROBABILISTIC, ResultChance.classifyWeight(120f, 150f));
+        assertEquals(ResultChance.Kind.PROBABILISTIC, ResultChance.classifyWeight(8f, 150f));
+        assertEquals(ResultChance.Kind.PROBABILISTIC, ResultChance.classifyWeight(1f, 150f));
+    }
+
+    @Test
+    @DisplayName("★ 池子里只有一项 → 必然产出（sturdy_sheet / track 就是这样）")
+    void singleEntryPoolIsGuaranteed() {
+        // 这两条配方的 results 只有一项、权重 1，归一化后概率恰好 1.0。
+        // 如果判成概率产出，下游会按期望值算 —— 而它其实每次都产出。
+        assertEquals(ResultChance.Kind.GUARANTEED, ResultChance.classifyWeight(1f, 1f));
+    }
+
+    @Test
+    @DisplayName("权重和 ≤ 0 → NEVER（没法归一化，不能当成必然）")
+    void nonPositiveTotalIsNever() {
+        // 当成必然会让每条产出都变 100%；当成概率会得到除零后的 Infinity。
+        // 两种都是错的，只能说「读不到」。
+        assertEquals(ResultChance.Kind.NEVER, ResultChance.classifyWeight(1f, 0f));
+        assertEquals(ResultChance.Kind.NEVER, ResultChance.classifyWeight(1f, -5f));
+    }
+
+    @Test
+    @DisplayName("★ Infinity 权重 → 必然产出，且不会污染其他条目")
+    void infiniteWeightIsGuaranteed() {
+        // Inf / 有限和 = Inf → classify 判为必然。这正是想要的：
+        // 无限大的权重本来就压过所有其他条目。
+        assertEquals(ResultChance.Kind.GUARANTEED, ResultChance.classifyWeight(Float.POSITIVE_INFINITY, 100f));
+    }
+
+    @Test
+    @DisplayName("★ NaN 权重 → 必然产出（不丢数据）")
+    void nanWeightIsGuaranteed() {
+        assertEquals(ResultChance.Kind.GUARANTEED, ResultChance.classifyWeight(Float.NaN, 100f));
+    }
+
+    @Test
+    @DisplayName("权重为 0 或负数 → NEVER（被禁用的产出）")
+    void zeroWeightIsNever() {
+        assertEquals(ResultChance.Kind.NEVER, ResultChance.classifyWeight(0f, 100f));
+        assertEquals(ResultChance.Kind.NEVER, ResultChance.classifyWeight(-3f, 100f));
+    }
 }

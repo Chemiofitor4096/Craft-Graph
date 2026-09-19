@@ -249,15 +249,22 @@ all.
 
 What is still missing, and why it is not a viewer problem either:
 
-- `sequenced_assembly` nests a whole list of sub-recipes. Read naively it would *look* readable
-  while omitting most of the real material cost, so it needs a dedicated adapter or an honest
-  `opaque`. It is not covered yet.
+- `sequenced_assembly` was the other gap and is now flattened properly. It nests a whole list of
+  sub-recipes, so reading it naively would *look* readable while omitting most of the real
+  material cost. The adapter reads Create's own source semantics rather than guessing: the pass
+  count is `sequence.size() × loops` (so every step's ingredients are consumed `loops` times),
+  and the `results` list carries **weights, not probabilities** (`getOutputChance()` is
+  `weight / totalWeight`). It also drops the **transitional item** from each step's inputs —
+  that item is produced in-line, and leaving it in would put something the player cannot obtain
+  into the raw-material list. The total processing time is reported too, which downstream turns
+  into a count of parallel assembly lines.
 - **Machine names for modded recipes need JEI.** Create does not override `getToastSymbol()`,
   so its recipes get the interface default (`crafting_table`) which we deliberately refuse to
   trust — and there is no reliable way to derive the machine from the recipe type either
   (Create's sandpaper is an *item*, splashing and haunting share one machine, filling/emptying
-  split across a spout and a drain). JEI's catalysts are the authoritative answer, which is why
-  JEI is the first viewer to integrate rather than EMI.
+  split across a spout and a drain, and a sequenced assembly line is several blocks). JEI's
+  catalysts are the authoritative answer, which is why JEI is the first viewer to integrate
+  rather than EMI.
 - Energy is still `null` everywhere.
 
 **Not yet tested against a large tech pack.** Modded machine recipes are the interesting case,

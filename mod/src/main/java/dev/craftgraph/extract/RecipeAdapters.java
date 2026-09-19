@@ -59,8 +59,10 @@ public final class RecipeAdapters {
             List<RecipeTypeAdapter> list = new ArrayList<>();
             list.add(new CookingAdapter());
             list.add(new SmithingAdapter());
-            addIfLoaded(list, "create", "Create",
-                    () -> new CreateAdapter());
+            addIfLoaded(list, "create", "Create", () -> new CreateAdapter());
+            // 序列组装不是 ProcessingRecipe 的子类，所以是另一个适配器。
+            // 两个都在同一个 isLoaded 判断下 —— 它们共用一份 Create 软依赖。
+            addIfLoaded(list, "create", "Create（序列组装）", () -> new SequencedAssemblyAdapter());
             adapters = List.copyOf(list);
         }
         return adapters;

@@ -25,12 +25,13 @@
 | 类型特有字段的适配器 `extract/RecipeAdapters` | 🟡 | 耗时靠 `instanceof` 派发，**只能靠 `npm run live` 验证**（见下） |
 | 锻造输入/产出适配器 `extract/SmithingAdapter` + 访问转换器 | ✅ | 真游戏跑通：opaque 40 → 31，9 条下界合金可读、18 条纹饰不再报假产物 |
 | Create 适配器 `extract/CreateAdapter`（多产出/概率/流体/耗时） | 🟡 | 编译对着 Create 真实 jar 验过；**运行路径需要装了 Create 的实例**（见下） |
-| 产出概率分类 `extract/ResultChance` | ✅ | `ResultChanceTest`（5 用例，含 NaN / >1 / 0 边界） |
+| Create 序列组装适配器 `extract/SequencedAssemblyAdapter` | 🟡 | 同上；`loops` 与权重池语义读 Create 源码确认，不是猜的 |
+| 产出概率分类 `extract/ResultChance` | ✅ | `ResultChanceTest`（11 用例，含 NaN / >1 / 权重归一化边界） |
 | 访问转换器文件守卫 `AccessTransformerTest` | ✅ | 3 用例（钉住 AT 与适配器的配套关系） |
 | 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
 | 配方查看器集成（JEI 优先） | ⬜ | 只补「只有视图器才知道的东西」，见下 |
 
-**测试共 115 个用例，全部不需要启动 Minecraft。**
+**测试共 121 个用例，全部不需要启动 Minecraft。**
 
 ### 哪些东西测不了，只能靠进游戏
 
@@ -72,7 +73,7 @@
 **「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 115 用例
+cd mod && ./gradlew test        # Java 侧 121 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -298,7 +299,7 @@ EMI 的 API 同样核实过：`EmiRecipe#getInputs()/getOutputs()/getCatalysts()
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 115 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 121 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 
