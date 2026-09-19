@@ -1,0 +1,243 @@
+{
+  "_comment": "CraftGraph 测试夹具。这是一份手写的、假的 Bridge 响应数据，用来在没有 Minecraft 的情况下开发和测试 MCP Server。它刻意覆盖了所有难处理的边界情况：标签输入、多方案、循环配方、概率副产、流体、读不懂的配方。请勿删除其中的任何一种情况。",
+
+  "health": {
+    "ok": true,
+    "protocolVersion": 1,
+    "modVersion": "0.1.0-fixture",
+    "mcVersion": "1.21.1",
+    "loader": "neoforge-21.1.200",
+    "emi": null,
+    "jei": null,
+    "recipeCount": 11,
+    "itemCount": 18,
+    "dataVersion": 1,
+    "uptimeMs": 1000
+  },
+
+  "tags": {
+    "items": {
+      "forge:ingots/iron": ["minecraft:iron_ingot", "othermod:iron_ingot"],
+      "forge:ores/iron": ["minecraft:iron_ore", "minecraft:deepslate_iron_ore"],
+      "minecraft:planks": ["minecraft:oak_planks", "minecraft:birch_planks"],
+      "minecraft:logs": ["minecraft:oak_log", "minecraft:birch_log"],
+      "minecraft:coals": ["minecraft:coal", "minecraft:charcoal"]
+    },
+    "blocks": {},
+    "fluids": {}
+  },
+
+  "registry": {
+    "items": [
+      "minecraft:iron_ore",
+      "minecraft:deepslate_iron_ore",
+      "minecraft:raw_iron",
+      "minecraft:iron_ingot",
+      "minecraft:iron_nugget",
+      "minecraft:iron_block",
+      "minecraft:coal",
+      "minecraft:charcoal",
+      "minecraft:torch",
+      "minecraft:stick",
+      "minecraft:oak_log",
+      "minecraft:birch_log",
+      "minecraft:oak_planks",
+      "minecraft:birch_planks",
+      "minecraft:obsidian",
+      "othermod:iron_ingot",
+      "create:crushed_raw_iron",
+      "somemod:tungsten_steel_ingot"
+    ]
+  },
+
+  "recipes": [
+    {
+      "id": "minecraft:iron_ingot_from_smelting_iron_ore",
+      "type": "minecraft:smelting",
+      "typeLabel": "Smelting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ores/iron" }] }
+      ],
+      "outputs": [{ "item": "minecraft:iron_ingot", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:furnace",
+      "duration": 200,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:iron_ingot_from_blasting_iron_ore",
+      "type": "minecraft:blasting",
+      "typeLabel": "Blasting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ores/iron" }] }
+      ],
+      "outputs": [{ "item": "minecraft:iron_ingot", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:blast_furnace",
+      "duration": 100,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "create:crushing/iron_ore",
+      "type": "create:crushing",
+      "typeLabel": "Crushing",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "forge:ores/iron" }] }
+      ],
+      "outputs": [{ "item": "create:crushed_raw_iron", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [
+        { "stack": { "item": "minecraft:iron_nugget", "count": 1 }, "chance": 0.75 }
+      ],
+      "machine": "create:crushing_wheel",
+      "duration": 100,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "examplepack:iron_ingot_from_crushed_iron",
+      "type": "minecraft:smelting",
+      "typeLabel": "Smelting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "item", "id": "create:crushed_raw_iron" }] }
+      ],
+      "outputs": [{ "item": "minecraft:iron_ingot", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:furnace",
+      "duration": 200,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:iron_block",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 9, "options": [{ "type": "tag", "id": "forge:ingots/iron" }] }
+      ],
+      "outputs": [{ "item": "minecraft:iron_block", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:iron_ingot_from_iron_block",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "item", "id": "minecraft:iron_block" }] }
+      ],
+      "outputs": [{ "item": "minecraft:iron_ingot", "count": 9 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:torch",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "item", "id": "minecraft:stick" }] },
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "minecraft:coals" }] }
+      ],
+      "outputs": [{ "item": "minecraft:torch", "count": 4 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:stick",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 2, "options": [{ "type": "tag", "id": "minecraft:planks" }] }
+      ],
+      "outputs": [{ "item": "minecraft:stick", "count": 4 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "minecraft:oak_planks",
+      "type": "minecraft:crafting",
+      "typeLabel": "Crafting",
+      "inputs": [
+        { "kind": "item", "count": 1, "options": [{ "type": "tag", "id": "minecraft:logs" }] }
+      ],
+      "outputs": [{ "item": "minecraft:oak_planks", "count": 4 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "minecraft:crafting_table",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "examplepack:obsidian_from_fluids",
+      "type": "examplepack:fluid_mixer",
+      "typeLabel": "Fluid Mixing",
+      "inputs": [
+        { "kind": "fluid", "count": 1000, "options": [{ "type": "fluid", "id": "minecraft:water" }] },
+        { "kind": "fluid", "count": 1000, "options": [{ "type": "fluid", "id": "minecraft:lava" }] }
+      ],
+      "outputs": [{ "item": "minecraft:obsidian", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "examplepack:mixer",
+      "duration": 40,
+      "energy": 4000,
+      "source": "vanilla",
+      "opaque": false
+    },
+
+    {
+      "id": "somemod:alloy_smelting/tungsten_steel",
+      "type": "somemod:alloy_smelting",
+      "typeLabel": "Alloy Smelting",
+      "inputs": [],
+      "outputs": [{ "item": "somemod:tungsten_steel_ingot", "count": 1 }],
+      "fluidOutputs": [],
+      "chanceOutputs": [],
+      "machine": "somemod:alloy_smelter",
+      "duration": null,
+      "energy": null,
+      "source": "vanilla",
+      "opaque": true
+    }
+  ]
+}

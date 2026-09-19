@@ -1,0 +1,28 @@
+# 统一行尾处理。
+#
+# 不设这个的话，仓库里会混着两种行尾：Windows 上写出来的文件是 CRLF，
+# 而 Gradle、npm 等工具生成的是 LF。后果是任何一次跨平台编辑都会让
+# 整个文件显示为「已修改」——几百行的假 diff 会把真正的改动埋掉。
+#
+# 规则：仓库里统一按 LF 存储，检出时按各平台/文件类型的需要转换。
+* text=auto
+
+# ---- 有硬性要求的文件类型，不能靠自动判断 ----
+#
+# Windows 批处理必须是 CRLF：某些 cmd.exe 版本解析 LF 结尾的 .bat 会出错。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Gradle wrapper 的 shell 脚本必须是 LF：CRLF 会让 Linux/macOS 报
+# "bad interpreter: /bin/sh^M"，而且报错信息完全不提行尾，很难查。
+gradlew  text eol=lf
+*.sh     text eol=lf
+
+# ---- 二进制，禁止任何转换 ----
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.xlsx  binary
+*.mca   binary
+*.nbt   binary

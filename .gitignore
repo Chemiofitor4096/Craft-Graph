@@ -1,0 +1,44 @@
+# ---- Java / Gradle (mod) ----
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+logs/
+run/
+run-*/
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# ---- Node / TypeScript (mcp-server) ----
+node_modules/
+dist/
+*.tsbuildinfo
+.npm/
+npm-debug.log*
+
+# 契约样本由 mod 的 ContractDumpTest 生成（gradlew test）。
+# 不提交生成物：宁可要求先跑一次 Gradle，也不要让陈旧样本造成契约测试假通过。
+shared/fixtures/bridge-dump/
+
+# ---- CraftGraph 运行时产物 ----
+# MCP Server 的本地配方缓存（体积可能很大，且随时可重建）
+.cache/
+*.cache.json
+*.cache.sqlite
+
+# 本地配置（可能含 token）
+.env
+.env.local
+config.local.json
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
