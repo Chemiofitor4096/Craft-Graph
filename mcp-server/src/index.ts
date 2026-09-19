@@ -15,7 +15,12 @@ import { resolveBridgeLocation } from "./config.js";
 import { StoreManager } from "./manager.js";
 import { registerTools } from "./tools.js";
 
-const VERSION = "0.1.0";
+/**
+ * Server 版本。与 Mod 的 `mod_version`（mod/gradle.properties）保持一致 ——
+ * 两者是同一个产品的两半，版本号分开走只会让人对着两个数字猜「哪个是新的」。
+ * npm 发布是独立的事，但版本号同步没有问题。
+ */
+const VERSION = "0.2.0";
 
 /**
  * 这段会作为 server instructions 发给 AI 客户端。
