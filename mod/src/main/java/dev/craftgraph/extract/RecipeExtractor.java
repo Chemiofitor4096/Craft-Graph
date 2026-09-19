@@ -160,7 +160,9 @@ public final class RecipeExtractor {
         List<Models.Ingredient> inputs = new ArrayList<>();
         boolean opaque = false;
 
-        for (Ingredient ingredient : recipe.getIngredients()) {
+        // 输入槽位走适配器：有些配方类（锻造）通用接口返回空列表，但字段里其实有。
+        // 声明「不归我管」的适配器会返回 null，这里就落回通用接口的结果。
+        for (Ingredient ingredient : RecipeAdapters.ingredients(recipe, recipe.getIngredients())) {
             if (ingredient.isEmpty()) continue;
 
             // getItems() 给出这个槽位接受的所有物品 —— 但**不告诉你它原本是不是标签**。
@@ -184,15 +186,29 @@ public final class RecipeExtractor {
 
         // 产物。注意很多模组配方这条返回 EMPTY —— 那种情况我们会得到一个空 outputs，
         // 必须靠 opaque 标记让下游知道「不是没有产出，是我们读不到」。
-        List<Models.ItemStack> outputs = new ArrayList<>();
+        //
+        // 先取通用接口的结果再交给适配器：适配器返回 null 表示「用这个」，
+        // 返回空列表表示「这个不对，别报出去」。纹饰锻造要的正是后者 ——
+        // getResultItem() 在那里返回硬编码的铁胸甲占位符。
+        List<ItemStack> genericResults = new ArrayList<>();
         ItemStack result = safeResultItem(recipe);
         if (result != null && !result.isEmpty()) {
-            outputs.add(toItemStack(result));
+            genericResults.add(result);
+        }
+
+        List<Models.ItemStack> outputs = new ArrayList<>();
+        for (ItemStack stack : RecipeAdapters.results(recipe, genericResults)) {
+            outputs.add(toItemStack(stack));
         }
 
         // 用统一的判定规则。注意它也检查「没有输入」—— 真实配方不可能不消耗东西，
         // 所以无输入一定是「读不到输入」。只看产出的话，盔甲纹饰锻造会变成
         // 「有产出、无输入、opaque=false」，看起来像「纹饰不需要材料」，那是静默的错误答案。
+        //
+        // 锻造的两个子类现在走的路径不同（见 SmithingAdapter）：
+        //   升级配方 → 输入读到了、产出是真的 → 可读
+        //   纹饰配方 → 输入读到了、产出被适配器判为读不到 → 仍然 opaque，
+        //              reason 会明说是「读不到产出」而不是「输入和产出都读不到」
         opaque = Readability.isOpaque(inputs, outputs, opaque);
 
         // 类型特有的字段：耗时、机器。之前这两个恒为 null —— 通用接口给不出它们，

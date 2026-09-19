@@ -178,47 +178,73 @@ class of threading bugs.
 
 ## Status
 
-Verified end to end on a real 1.21.1 instance: 1290 recipes indexed, 3% flagged unreadable,
-37 ms main-thread extraction, AI client connected with zero configuration.
+Verified end to end on a real 1.21.1 instance: 1290 recipes indexed, 2% flagged unreadable,
+~40 ms main-thread extraction, AI client connected with zero configuration.
 
 | | |
 |---|---|
-| Bridge mod | Works. 104 JUnit tests, none of which need Minecraft |
+| Bridge mod | Works. 107 JUnit tests, none of which need Minecraft |
 | MCP server | Works. 41 algorithm tests, MCP protocol tests, cross-language contract tests |
 | Recipe coverage | All recipe types are read. 5 of the 7 types present in vanilla are 100% readable |
 | Machine & duration data | Every recipe gets a machine; the 112 cooking recipes get a duration. Energy is not exposed by vanilla at all — it stays `null` rather than being invented |
+| Smithing recipes | Read via an access transformer, the same way JEI does it. Netherite upgrades are fully readable; armour trims are read as far as they can honestly be |
 | Modded recipes | Not yet measured — see limitations below |
-| EMI integration | Not started (would improve coverage on heavy tech packs) |
+| Recipe viewer integration | Not started. JEI first, EMI optional — see limitations below |
 | In-game UI | Out of scope for the MVP by design |
 
 ## Known limitations
 
-**Unreadable recipes are real, and they are counted.** On vanilla, 40 of 1290 recipes are
-flagged `opaque`: 27 smithing recipes and 13 code-driven special recipes (dyeing, map cloning,
+**Unreadable recipes are real, and they are counted.** On vanilla, 31 of 1290 recipes are
+flagged `opaque`: 18 armour trims and 13 code-driven special recipes (dyeing, map cloning,
 fireworks, banner duplication). Run `npm run inspect` to see the breakdown by recipe type for
 your own pack.
 
-The smithing 27 are worth knowing about in detail, because they are the ones players ask about
-most (netherite gear). `SmithingRecipe` does not override `getIngredients()`, so the inherited
-default returns an empty list and there is nothing declarative to read — the three slots are
-only reachable through `isTemplateIngredient` / `isBaseIngredient` / `isAdditionIngredient`.
-Marking them `opaque` is the honest answer, and the AI is told to say "I cannot read this"
-instead of "this needs no materials".
+The 13 code-driven specials cannot be fixed by anyone: their logic lives in Java, they declare
+no ingredients, and recipe viewers special-case them for display rather than reading them.
+`opaque` is the honest answer here, and the AI is told to say "I cannot read this" instead of
+"this needs no materials".
 
-Observed behaviour when asked "how do I make a netherite helmet": the AI did relay "the input
-cannot be read, and that does not mean it needs no materials" — then went on to describe the
-vanilla recipe from its own training data, explicitly labelled as not coming from the game.
-On vanilla that happens to be right. On a modpack, where a KubeJS script or another mod may
-have changed it, the same sentence would be confidently wrong. **`opaque` prevents a *silent*
-wrong answer; it does not stop the model from filling the gap with memory.** Recovering the
-smithing ingredients (iterate the item registry, test the three predicates) is possible but has
-not been done — and it is worth more than the raw coverage number suggests.
+The 18 armour trims are a different story, and worth understanding because they show where the
+line is. Their inputs **are** readable — `SmithingRecipe` does not override `getIngredients()`,
+but the three slots sit in package-private fields, so the mod ships an
+`META-INF/accesstransformer.cfg` that makes them public (this is exactly what JEI does). What is
+*not* representable is the output: `SmithingTrimRecipe#getResultItem()` returns a hardcoded
+placeholder (`new ItemStack(Items.IRON_CHESTPLATE)` with the first trim pattern and redstone),
+because the real result is combinatorial — any trimmable armour piece, with the trim applied.
+So trims report their three inputs and an explicitly empty output, which keeps them `opaque`
+with the reason "output unreadable" rather than the earlier "input and output both unreadable".
+
+That placeholder is worth a warning for anyone touching this code: **fixing only the inputs
+would have been worse than doing nothing.** Once the inputs are non-empty, `Readability` stops
+flagging the recipe, and that hardcoded iron chestplate goes from "a marked placeholder" to "a
+confidently wrong answer". The adapter therefore suppresses the generic result explicitly for
+trims.
+
+Observed behaviour before the fix, when asked "how do I make a netherite helmet": the AI relayed
+"the input cannot be read, and that does not mean it needs no materials" — then described the
+vanilla recipe from its own training data, explicitly labelled as not coming from the game. On
+vanilla that happened to be right; on a modpack, where a KubeJS script or another mod may have
+changed it, the same sentence would be confidently wrong. **`opaque` prevents a *silent* wrong
+answer; it does not stop the model from filling the gap with memory** — which is why widening
+real coverage matters more than the coverage percentage suggests.
 
 **Machine counts only cover part of the chain.** Vanilla has no duration field for crafting
 recipes, so workbench steps are reported as manual rather than as a machine count. That is
 correct — you do not build a crafting table per craft — but it means a plan for something like
 a torch reports machines only for the smelting step. `get_bridge_status` states the coverage
 numbers explicitly so the AI can caveat its answer.
+
+**Modded machine recipes are the next real gap, and a recipe viewer can only fix part of it.**
+Inspecting Create's own recipe data (1843 recipes, 15 of its own types) shows what those look
+like: inputs are declared declaratively, but `results` is a *list* with per-entry `count` and
+`chance`, `processingTime` carries the duration, and fluids appear alongside items in both
+directions. Our extractor reads a single output from `getResultItem()`, so a Create crushing
+recipe (3 results, two of them at `chance: 0.75`) would come back with one output and no
+probabilities — incomplete rather than flagged. Multistep recipes like `sequenced_assembly`
+nest a whole `sequence` of sub-recipes, and would look readable while omitting most of the real
+cost. Both are work items, not viewer problems: JEI and EMI can reveal the multiple outputs,
+neither exposes `processingTime`, and a nested sequence needs a dedicated adapter or an honest
+`opaque`.
 
 **Not yet tested against a large tech pack.** Modded machine recipes are the interesting case,
 and they are the ones most likely to be `opaque`. If you try it on a big pack, that number

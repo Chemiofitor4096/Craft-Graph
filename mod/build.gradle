@@ -62,6 +62,16 @@ neoForge {
             sourceSet sourceSets.main
         }
     }
+
+    // 访问转换器：把 SmithingRecipe 那三个包私有槽位变公开。
+    // 不这么做的话 27 条锻造配方读不到输入（见 cfg 文件里的说明）。
+    accessTransformers {
+        from 'src/main/resources/META-INF/accesstransformer.cfg'
+    }
+    // 条目写错（字段改名、拼错）时构建期就失败。
+    // 不校验的话症状是「启动时崩」或者「又变回 27 条 opaque」——
+    // 后者尤其难查，因为它看起来跟「本来就这样」一模一样。
+    validateAccessTransformers = true
 }
 
 // 把 gradle.properties 里的 mod 元信息注入到 neoforge.mods.toml。

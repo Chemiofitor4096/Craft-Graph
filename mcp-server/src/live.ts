@@ -96,6 +96,28 @@ function parseRecipeIds(text: string): string[] {
   return [...text.matchAll(/^- `([^`]+)`/gm)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
 }
 
+interface RecipeEntry {
+  id: string;
+  typeLabel: string;
+  opaque: boolean;
+}
+
+/**
+ * 从配方列表里取出 id + 类型标签。
+ *
+ * 比只取 id 多一步是必要的：按某个物品查「哪些配方用它」时，
+ * 结果里会混着不同的配方类型（拿模板查会同时命中「用模板升级装备」和
+ * 「用模板复制模板」两条完全不同的链），只按 id 取第一条会取到错的那类。
+ */
+function parseRecipeEntries(text: string): RecipeEntry[] {
+  const entries: RecipeEntry[] = [];
+  for (const m of text.matchAll(/^- `([^`]+)` — (.+?) → /gm)) {
+    if (m[1] === undefined || m[2] === undefined) continue;
+    entries.push({ id: m[1], typeLabel: m[2].trim(), opaque: m[2].includes("读不懂") || false });
+  }
+  return entries;
+}
+
 function parseType(detail: string): string | null {
   return detail.match(/^- 类型：`([^`]+)`/m)?.[1] ?? null;
 }
@@ -325,6 +347,116 @@ try {
 
     if (want.machine !== null) {
       check(`${c.type} 的机器是 ${want.machine}`, c.machine === want.machine, `${c.id} machine=${c.machine}`);
+    }
+  }
+
+  // ============================================================ 锻造（访问转换器）
+  //
+  // 27 条锻造配方曾经全被标成 opaque：SmithingRecipe 不覆写 getIngredients()，
+  // 三个槽位（template / base / addition）藏在包私有字段里，通用接口一条都读不到。
+  // 现在 mod 侧带了一份 accesstransformer.cfg 把它们变公开（JEI 做的是同一件事）。
+  //
+  // 这一节同时守着那个陷阱：**只补输入不处理产出会更糟。**
+  // SmithingTrimRecipe.getResultItem() 返回硬编码的「铁胸甲 + 第一个纹饰」占位符，
+  // 输入一旦非空、Readability 就会判它可读，那个占位符便从「被标记的假数据」
+  // 升级成「一个理直气壮的答案」。所以下面既断言输入读到了，也断言假产物没出现。
+  //
+  // 怎么找到这些配方：用模板物品去查「哪些配方把它当输入」。
+  // 这本身就是修复的端到端证据 —— 修复前锻造没有输入，倒排索引里查不到它们。
+  const SMITHING_PROBES = [
+    { template: "minecraft:netherite_upgrade_smithing_template", trimming: false, label: "下界合金升级（9 条）" },
+    { template: "minecraft:sentry_armor_trim_smithing_template", trimming: true, label: "盔甲纹饰（18 条）" },
+  ] as const;
+
+  for (const probe of SMITHING_PROBES) {
+    const found = await client.callTool({
+      name: "get_recipes_for_input",
+      arguments: { item: probe.template },
+    });
+    const foundText = textOf(found);
+
+    // 按模板查会同时命中两类配方：「用模板升级/饰纹装备」（我们要的）
+    // 和「用模板复制模板」的合成配方。只按类型标签挑出锻造那批。
+    // 这里不用 id 里的 "smithing" 做判据 —— 整合包可能给自定义 id。
+    const entries = parseRecipeEntries(foundText);
+    const smithing = entries.filter((e) => /smith/i.test(e.typeLabel));
+
+    // 修复前这里必然是 0 条：锻造没有输入，倒排索引里就没有它。
+    // 所以这一条同时是「AT 生效了」和「倒排索引把新输入索引进去了」的证据。
+    check(
+      `${probe.label}：按模板物品能查到锻造配方（修复前是 0 条）`,
+      smithing.length > 0,
+      `共 ${entries.length} 条命中，其中锻造 ${smithing.length} 条：` +
+        entries.map((e) => `${e.id}(${e.typeLabel})`).join("、"),
+    );
+
+    if (smithing.length === 0) continue;
+
+    const detail = await client.callTool({ name: "get_recipe_details", arguments: { recipeId: smithing[0]!.id } });
+    const detailText = textOf(detail);
+    process.stdout.write(`\n· 锻造样本 ${probe.label} → \`${smithing[0]!.id}\`\n${detailText}\n\n`);
+
+    check(
+      `${probe.label}：配方类型是 smithing`,
+      parseType(detailText) === "minecraft:smithing",
+      `type=${parseType(detailText)}`,
+    );
+
+    // 输入段的行：`- 1 × [minecraft:x | #tag]`
+    const inputLines = (detailText.match(/^- \d+ (?:mB )?× \[/gm) ?? []).length;
+    check(
+      `${probe.label}：读到了 3 个输入槽位（template / base / addition）`,
+      inputLines === 3,
+      `输入行数=${inputLines}\n${detailText.slice(0, 400)}`,
+    );
+
+    const inputOnly = detailText.match(/输入：\n([\s\S]*?)\n\n输出：/)?.[1]?.split("\n") ?? [];
+
+    if (probe.trimming) {
+      // 纹饰的 base 是标签（#minecraft:trimmable_armor），断言它没被展开成物品列表。
+      // 必须看**第 2 行**：只断言「输入里有 #」会假通过，因为模板复制那条合成配方的输入里也有标签。
+      // 这也正是用 AT 而不是「遍历注册表测三个谓词」的理由 ——
+      // 谓词只能得到物品集合，会把标签身份展开掉。
+      check(
+        `${probe.label}：base 槽（第 2 个输入）保留了标签，没被展开成物品列表`,
+        (inputOnly[1] ?? "").includes("#"),
+        `第 2 个输入 = ${inputOnly[1] ?? "（没有）"}`,
+      );
+    } else {
+      // 升级配方：template 是模板物品、base 是**具体的那把钻石工具**（每把工具一条配方）、
+      // addition 在 NeoForge 下是标签（#c:ingots/netherite）。
+      // 这里不断言「三个槽都是具体物品」—— 那是错的（实测踩过）。
+      // 改成跨字段校验：模板槽 + 钻石工具 + 下界合金产出，三者对得上才说明
+      // 三个槽分别来自 template / base / addition 三个字段，而不是同一个字段抄了三遍。
+      check(
+        `${probe.label}：三个槽分别来自 template / base / addition（模板 + 钻石工具 + 下界合金产出）`,
+        (inputOnly[0] ?? "").includes(probe.template) &&
+          (inputOnly[1] ?? "").includes("diamond") &&
+          /netherite_/.test(detailText.match(/输出：\n([\s\S]*)/)?.[1] ?? ""),
+        `输入 = ${inputOnly.slice(0, 3).join(" | ")}`,
+      );
+    }
+
+    if (probe.trimming) {
+      // 纹饰的产出是组合式的（任意可饰纹盔甲 + 纹饰），无法用单一物品表达。
+      // 诚实答案 = 标成读不懂，而不是拿 getResultItem 的占位符顶上去。
+      check(
+        `${probe.label}：标为读不懂（产出无法用单一物品表达，这是诚实的）`,
+        detailText.includes("读不懂"),
+        detailText.split("\n").slice(0, 8).join(" / "),
+      );
+      // ★ 这一条是整段的重点：硬编码占位符不许出现在产出里。
+      check(
+        `${probe.label}：没有报出 getResultItem 的假产物（铁胸甲）`,
+        !/输出：[\s\S]*iron_chestplate/.test(detailText),
+        detailText.slice(0, 500),
+      );
+    } else {
+      check(
+        `${probe.label}：不再读不懂，且产出是真的（下界合金件）`,
+        !detailText.includes("读不懂") && /输出：[\s\S]*netherite_/.test(detailText),
+        detailText.slice(0, 500),
+      );
     }
   }
 

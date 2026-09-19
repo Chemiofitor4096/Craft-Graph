@@ -23,27 +23,30 @@
 | Mod 入口接线 `client/ClientBridge` + `CraftGraph` | ✅ | 真游戏跑通（1290 条配方，服务发现零配置） |
 | 配方抽取 `extract/RecipeExtractor` | ✅ | 真游戏跑通；`duration` / `machine` 由 `npm run live` 逐条断言 |
 | 类型特有字段的适配器 `extract/RecipeAdapters` | 🟡 | 耗时靠 `instanceof` 派发，**只能靠 `npm run live` 验证**（见下） |
+| 锻造输入/产出适配器 `extract/SmithingAdapter` + 访问转换器 | ✅ | 真游戏跑通：opaque 40 → 31，9 条下界合金可读、18 条纹饰不再报假产物 |
+| 访问转换器文件守卫 `AccessTransformerTest` | ✅ | 3 用例（钉住 AT 与适配器的配套关系） |
 | 服务发现 `DiscoveryFile` | ✅ | 真游戏跑通（`~/.craftgraph/bridge.json`） |
-| EMI 软依赖增强 | ⬜ | 提高 opaque 配方的解析率 |
+| 配方查看器集成（JEI 优先） | ⬜ | 只补「只有视图器才知道的东西」，见下 |
 
-**测试共 104 个用例，全部不需要启动 Minecraft。**
+**测试共 107 个用例，全部不需要启动 Minecraft。**
 
 ### 哪些东西测不了，只能靠进游戏
 
-`RecipeAdapters` 的派发判据是 `instanceof AbstractCookingRecipe`，这需要真实的 MC 类才能验证，
-而测试源码集**看不到 Minecraft**（ModDevGradle 只把它加到主源码集）。
+`RecipeAdapters` 的派发判据是 `instanceof AbstractCookingRecipe` / `instanceof SmithingTrimRecipe`，
+这需要真实的 MC 类才能验证，而测试源码集**看不到 Minecraft**（ModDevGradle 只把它加到主源码集）。
 所以：
 
 | 部分 | 谁来验证 |
 |---|---|
-| 类型→机器对照表、字段覆盖度审计 | JUnit（纯逻辑，不碰 MC） |
-| `instanceof` 派发是否真的匹配那 4 种烹饪配方 | **`npm run live`**，在真游戏上按类型逐条核对 |
+| 类型→机器对照表、字段覆盖度审计、AT 文件内容 | JUnit（纯逻辑，不碰 MC） |
+| `instanceof` 派发是否真的匹配那 4 种烹饪配方 / 两个锻造子类 | **`npm run live`**，在真游戏上按类型逐条核对 |
+| 锻造的输入真的读到了、假产物真的没出现 | **`npm run live`**，见 live.ts 的锻造段 |
 
 这条分工是交过学费的：`duration` 曾经在真数据里全是 `null`，而所有 JUnit 用例全绿。
 **「编译器能验证的部分」和「只有真游戏能验证的部分」必须分清，后者要有专门的层去测。**
 
 ```bash
-cd mod && ./gradlew test        # Java 侧 104 用例
+cd mod && ./gradlew test        # Java 侧 107 用例
 cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 ```
 
@@ -231,19 +234,45 @@ MCP Server 收到后只把本地缓存标记为失效，下次请求时重建 �
 `bridge_shutdown` 用于游戏退出时让 MCP Server 立刻答复"游戏已关闭"，
 而不是干等 HTTP 超时。
 
-### 6. EMI 软依赖增强（3~5 天）
+### 6. 配方查看器增强（JEI 优先，EMI 可选）—— 只补「只有视图器才知道的东西」
 
-用 `compileOnly` + 反射/可选加载，装了就用来补 `typeLabel` / `machine`，
-并提高 `opaque` 配方的解析率。**去掉 EMI 必须仍然能编译和运行。**
+**不要把能自己读的交给视图器。** 这条是踩过来的：锻造那 27 条一开始被归给 EMI，
+实际上靠一份访问转换器（第 9 条决策）就解决了，零依赖。
 
-EMI 版本：`1.1.24+1.21.1`（Modrinth 标注 `client_only`，这也是本 Mod 做成客户端模组的原因）。
+真正只有视图器才知道的是这几类：
+
+| 缺口 | 为什么视图器才知道 |
+|---|---|
+| 模组机器配方的输入 | 模组的配方类没有通用接口，视图器的插件知道怎么读它的自定义字段 |
+| 模组机器的名字 | 没有插件的话，`getToastSymbol()` 的接口默认值会把每台模组机器都报成工作台 |
+| 能耗 FE | 原版根本没有这个数据 |
+
+JEI 的能力逐条核实过（19.56.0.441 的 api jar + 源码）：
+
+- `createRecipeLookup(RecipeType).get()` 枚举某类别下全部配方；`createRecipeCategoryLookup()` 枚举类别
+- **`getRecipeIngredients(category, recipe)` → `IIngredientSupplier`**，
+  `getIngredients(RecipeIngredientRole)` 拿归一化配料，**不需要 GUI 绘制**
+- 角色是 `INPUT` / `OUTPUT` / `CATALYST` / `RENDER_ONLY` —— 语义正好对上我们的 `inputs` / `outputs` / `machine`
+- `createRecipeCatalystLookup(RecipeType).getItemStack()` —— **催化剂就是机器**
+- 配方对象是 `RecipeHolder<...>`，**能按配方 id 与我们已有的抽取结果 join**
+  （所以是「按 id 补字段」，不是「换一套数据源」）
+- 拿 `IJeiRuntime` 的唯一途径是实现 `IModPlugin#onRuntimeAvailable`，
+  也就是要注册一个 `@JeiPlugin` 类 —— 软依赖的标准做法，类只在 JEI 存在时加载
+
+**JEI 不提供的两样**（别指望它）：耗时的概念完全没有（模组的 `processingTime`
+只能靠各模组自己的适配器读），概率也不作为字段暴露（EMI 的 `EmiStack#getChance()` 有）。
+
+EMI 的 API 同样核实过：`EmiRecipe#getInputs()/getOutputs()/getCatalysts()` 更直接，
+且 `getBackingRecipe()` 也能 join。但普及率远低于 JEI，所以排在后面，可能一直不做。
+
+**去掉任何视图器必须仍然能编译和运行**，这条是第 2 条决策的核心。
 
 ## 构建
 
 ```bash
 cd mod
 ./gradlew build          # 编译 + 打包（已验证可用）
-./gradlew test           # 104 个 JUnit 用例，不需要启动 Minecraft
+./gradlew test           # 107 个 JUnit 用例，不需要启动 Minecraft
 ./gradlew runClient      # 启动带 Mod 的游戏
 ```
 
