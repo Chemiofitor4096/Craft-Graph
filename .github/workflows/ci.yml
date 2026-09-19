@@ -14,11 +14,15 @@ concurrency:
 jobs:
   # ------------------------------------------------------------------ Mod
   #
-  # 这个 Mod 的 83 个测试**不需要启动 Minecraft**（配方索引、归一化、HTTP 服务
+  # 这个 Mod 的 104 个测试**不需要启动 Minecraft**（配方索引、归一化、HTTP 服务
   # 都做成了纯 Java），所以 CI 里跑得动。
   #
   # 但 `./gradlew test` 仍然需要完整的 NeoForge 类路径：首次运行要下载并反编译
   # Minecraft，在冷缓存下会慢好几分钟。setup-gradle 负责缓存，之后的运行快得多。
+  #
+  # 有两件事 CI 测不到，只能靠 `npm run live` 在真游戏上验证：抽取层里
+  # `instanceof AbstractCookingRecipe` 的派发（测试类路径看不到 Minecraft），
+  # 以及真数据里 duration / machine 到底有没有值。见 mod/README.md 的说明。
   mod:
     name: Bridge Mod
     runs-on: ubuntu-latest

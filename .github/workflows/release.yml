@@ -1,0 +1,128 @@
+name: Release
+
+# 打 tag 即发布：把 Mod jar 附到 GitHub Release 上。
+#
+# 为什么单独一个 workflow 而不是塞进 ci.yml：
+# ci.yml 跑在 push 到 main / PR 上，是「每次改代码都验证」；
+# 这个是「决定对外发布时」才跑，权限要求也不同（需要 contents: write）。
+# 混在一起会让普通的 PR 也带上写权限。
+on:
+  push:
+    tags: ['v*']
+  # 手动触发 = 干跑：只构建、校验、上传成 workflow artifact，不建 Release。
+  # 发布流程本身值得先干跑一次 —— 等打完 tag 才发现只有 tag 触发的那条路径有问题，
+  # 就得多打一个 tag 才能修。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要校验的版本 tag（形如 v0.1.0），用于干跑时比对产物版本'
+        required: true
+
+permissions:
+  # 默认的 GITHUB_TOKEN 对 contents 是只读，建 Release 需要显式提权。
+  contents: write
+
+jobs:
+  release:
+    name: 构建并发布 Mod jar
+    runs-on: ubuntu-latest
+    # 与 ci.yml 同理：冷缓存下要下载并反编译 Minecraft，给个上限避免挂到 6 小时。
+    timeout-minutes: 40
+    env:
+      # tag 推送用 ref 本身；手动触发用输入的那个（仅用于校验，不发布）
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 检查 gradlew 可执行位
+        run: |
+          if [ ! -x mod/gradlew ]; then
+            echo "::error::mod/gradlew 在 git 里不是可执行文件（应为 100755）。"
+            echo "::error::修复：git update-index --chmod=+x mod/gradlew 然后提交，提交前不要 reset。"
+            exit 1
+          fi
+
+      # build 依赖 check → test，所以发出去的 jar 一定是测试通过的。
+      - name: 构建与测试
+        working-directory: mod
+        run: ./gradlew build --no-daemon --stacktrace
+
+      # 这一步是这个 workflow 里最值钱的一道检查。
+      #
+      # tag 是 v0.1.1 而 gradle.properties 里还是 0.1.0，是很常见的手滑 ——
+      # 后果是 Release 页面写着 0.1.1，附件却是一个自我标识为 0.1.0 的 jar，
+      # 玩家装上去以后游戏里显示的版本对不上，排查起来要绕一大圈。
+      # 与其发布之后再发现，不如在这里直接失败。
+      - name: 校验产物版本与 tag 一致
+        working-directory: mod
+        run: |
+          set -euo pipefail
+          TAG_VER="${RELEASE_TAG#v}"
+          FILE_VER=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+
+          if [ "$FILE_VER" != "$TAG_VER" ]; then
+            echo "::error::tag 是 ${RELEASE_TAG}，但 gradle.properties 里 mod_version=${FILE_VER}"
+            echo "::error::先把 mod_version 改成 ${TAG_VER} 并提交，再打 tag。"
+            echo "::error::否则 Release 标称的版本和 jar 自我标识的版本会不一致。"
+            exit 1
+          fi
+
+          JAR="build/libs/craftgraph-${FILE_VER}.jar"
+          if [ ! -f "$JAR" ]; then
+            echo "::error::没找到 $JAR —— 构建产物名字与 mod_version 不符？"
+            ls -la build/libs/
+            exit 1
+          fi
+
+          # jar 内部的 metadata 也要对得上：文件名对而 mods.toml 没跟着变，
+          # 是上面那条检查盖不住的另一种手滑。
+          if ! unzip -p "$JAR" META-INF/neoforge.mods.toml | grep -q "version = \"${FILE_VER}\""; then
+            echo "::error::$JAR 里的 neoforge.mods.toml 版本不是 ${FILE_VER}"
+            unzip -p "$JAR" META-INF/neoforge.mods.toml
+            exit 1
+          fi
+
+          echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / jar 内 metadata 一致"
+
+      - name: 上传构建产物（干跑时可从这里下载检查）
+        uses: actions/upload-artifact@v4
+        with:
+          name: craftgraph-mod-jar
+          path: mod/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14
+
+      # 只有真正的 tag 推送才建 Release。手动触发到这一步为止。
+      - name: 发布 GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${RELEASE_TAG#v}"
+
+          # --generate-notes 会按 commit 自动归类，比手写更容易保持准确。
+          # 首个发布的版本另外给一段安装说明：Mod 和 MCP Server 是两半，
+          # 只装 jar 是问不出任何东西的，这一点必须在最显眼的位置写清楚。
+          gh release create "$RELEASE_TAG" \
+            --title "CraftGraph ${VER}" \
+            --generate-notes \
+            mod/build/libs/craftgraph-${VER}.jar \
+            mod/build/libs/craftgraph-${VER}-sources.jar
+
+      - name: 干跑结束提示
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "干跑完成：构建与版本校验都通过，产物在 workflow artifacts 里。"
+          echo "确认无误后打 tag 推送即可真正发布："
+          echo "  git tag v$(grep -E '^mod_version=' mod/gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
+          echo "  git push origin --tags"

@@ -76,19 +76,21 @@ AI 查的是你**当前实际加载的整合包**的实时配方数据。
 
 ## 安装
 
-> **当前状态**：Mod 和 Server 都还没有发布到 Modrinth / CurseForge / npm。
-> 暂时从源码构建，大约两分钟。
+两半，**两个都要装** —— 只放 jar 是问不出任何东西的，配方树和产线计算全在 Server 侧。
+
+**1. Mod** —— 从 [Releases 页面](https://github.com/Chemiofitor4096/Craft-Graph/releases)
+下载 `craftgraph-<版本>.jar` 放进 mods 目录。没有对应你游戏版本的 Release？自己构建：
 
 ```bash
-git clone https://github.com/Luzzi/craftgraph.git
-cd craftgraph
-
-# 1. 构建 Mod，把 jar 放进 mods 目录
-cd mod && ./gradlew build
+git clone https://github.com/Chemiofitor4096/Craft-Graph.git
+cd Craft-Graph/mod && ./gradlew build
 # → mod/build/libs/craftgraph-*.jar  →  放进 .minecraft/mods/
+```
 
-# 2. 构建 MCP Server
-cd ../mcp-server && npm install && npm run build
+**2. MCP Server** —— 还没发布到 npm，从源码构建：
+
+```bash
+cd Craft-Graph/mcp-server && npm install && npm run build
 ```
 
 然后把 AI 客户端指向 `mcp-server/dist/index.js`。以 Claude Code 为例：
@@ -98,7 +100,7 @@ cd ../mcp-server && npm install && npm run build
   "mcpServers": {
     "craftgraph": {
       "command": "node",
-      "args": ["/craftgraph 的绝对路径/mcp-server/dist/index.js"]
+      "args": ["/Craft-Graph 的绝对路径/mcp-server/dist/index.js"]
     }
   }
 }
