@@ -249,7 +249,7 @@ cd mod
 
 wrapper 已经生成好了，不需要本机装 Gradle。用 IDE 的话直接把这个目录当 Gradle 项目打开即可。
 
-**已验证**：`BUILD SUCCESSFUL`，产出 `build/libs/craftgraph-0.1.0.jar`，
+**已验证**：`BUILD SUCCESSFUL`，产出 `build/libs/craftgraph-<version>.jar`，
 包含 `CraftGraph`、`MainThreadDispatcher`、`DiscoveryFile`、`api.Models.*`。
 不设 `JAVA_HOME` 也能构建（toolchain 从 PATH 找到 JDK 21）。
 
