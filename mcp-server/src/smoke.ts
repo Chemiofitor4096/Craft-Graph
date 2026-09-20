@@ -256,6 +256,23 @@ try {
     "test",
     2,
   );
+  // ---- 替代配方要带上类型：模型靠它判断「还有没有更正常的路线」----
+  //
+  // 只有数量不够用：实测一个 Create 包里「铁镐怎么做」首选了粉碎铁马铠，而更正常的
+  // 熔炼矿石就混在那 N 条里 —— 模型看不到就无从纠正。判断哪条合理需要世界知识，
+  // 工具没有，所以工具负责把菜单摆出来。
+  const gadgetAlt = renderTree(
+    store,
+    buildRecipeTree(store, "item", "examplepack:gadget", 1),
+    "test",
+    1,
+  ).split("\n").find((l) => l.includes("另有"));
+  check(
+    "★ 「另有 N 条配方」带上类型（模型据此换路线）",
+    gadgetAlt !== undefined && /另有 \d+ 条配方可产出它（.+）/.test(gadgetAlt),
+    gadgetAlt ?? "（没有这一行）",
+  );
+
   check(
     "★ 选路按合并后的输入数：8 槽位/2 种输入的合成配方胜过 3 槽位/3 种输入的机器配方",
     gadgetTree.includes("examplepack:gadget_shaped") && !gadgetTree.includes("examplepack:gadget_machined"),

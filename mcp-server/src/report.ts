@@ -216,6 +216,36 @@ function coverageCaveat(store: RecipeStore): string {
   );
 }
 
+/**
+ * 替代配方的**类型直方图**，例如 `（Crushing 8 / Smelting 4 / Crafting 3）`。
+ *
+ * <h2>为什么要给类型，而不只是数量</h2>
+ *
+ * 原来的那行只写「另有 N 条配方可产出它」。这在整合包里不够用：实测一个 Create 包上
+ * 「铁镐怎么做」首选的路线是**粉碎铁马铠**（因为产出 2 个、合并后输入只有 1 种），
+ * 而更正常的「熔炼铁矿石」就混在那 N 条里，模型看不到、也就无从纠正。
+ *
+ * <p>而**判断哪条路线合理需要世界知识**（铁马铠只能搜刮、铁矿石能挖），
+ * 工具没有这份知识 —— 实测过两条纯数据判据（标签数、被多少配方消耗）都被真实数据推翻。
+ * 所以正确的分工是：**工具把菜单摆出来，模型来点菜**（要换路线用 `recipeChoice`）。
+ *
+ * <p>给类型而不是列出全部 id，是因为这行原本就为省 token 才只报数量的 ——
+ * 早先实测列出全部配方 id 占掉配方树输出的 9%，而类型直方图只要几十个字符就能
+ * 把「有哪些路可走」表达出来。
+ */
+function alternativeTypes(store: RecipeStore, ids: string[], maxTypes = 4): string {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const r = store.getRecipe(id);
+    const label = r?.typeLabel ?? r?.type ?? "(未知类型)";
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const shown = sorted.slice(0, maxTypes).map(([t, n]) => (n > 1 ? `${t} ${n}` : t));
+  const more = sorted.length > maxTypes ? `，等 ${sorted.length} 种` : "";
+  return `（${shown.join(" / ")}${more}）`;
+}
+
 function renderTreeNode(store: RecipeStore, node: TreeNode, depth: number, lines: string[]): void {
   const indent = "  ".repeat(depth);
   const mark = KIND_MARK[node.kind];
@@ -242,7 +272,11 @@ function renderTreeNode(store: RecipeStore, node: TreeNode, depth: number, lines
     lines.push(`${indent}  _另有 ${node.tagAlternatives.length} 个候选物品_`);
   }
   if (node.alternatives.length > 0) {
-    lines.push(`${indent}  _另有 ${node.alternatives.length} 条配方可产出它_`);
+    // 带上类型直方图：模型靠它判断「还有没有更正常的路线」，要换就用 recipeChoice。
+    // 见 alternativeTypes 的说明。
+    lines.push(
+      `${indent}  _另有 ${node.alternatives.length} 条配方可产出它${alternativeTypes(store, node.alternatives)}_`,
+    );
   }
 
   // 被展示裁剪掉的分支：把规模报出来，别让模型以为树就这么大。
