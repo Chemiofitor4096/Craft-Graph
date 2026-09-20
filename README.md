@@ -130,7 +130,7 @@ repositories {
 
 dependencies {
     // Compile against the DTOs only. To also load the mod at runtime, put the jar in mods/.
-    compileOnly 'dev.craftgraph:craftgraph:0.2.1'
+    compileOnly 'dev.craftgraph:craftgraph:0.2.2'
 }
 ```
 
