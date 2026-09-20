@@ -4,7 +4,7 @@ rem  CraftGraph release -- push main, tag the version, publish to KessokuMaven.
 rem
 rem  Double-click to run, or from a shell:  release.bat --dry-run
 rem
-rem  ⚠️ ASCII only, on purpose: cmd.exe parses a .bat using the *console* codepage
+rem ASCII only, on purpose: cmd.exe parses a .bat using the *console* codepage (GBK on
 rem  (GBK on Chinese Windows), so UTF-8 Chinese both renders as mojibake and
 rem  breaks parsing itself. `chcp 65001` inside the file does not help -- by then
 rem  the bytes were already misread. Same reason as live-check.bat.
@@ -42,10 +42,10 @@ echo [2/7] Repository state
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set BRANCH=%%b
 if not "%BRANCH%"=="main" goto :badbranch
 
-git diff --quiet
-if errorlevel 1 goto :dirty
-git diff --cached --quiet
-if errorlevel 1 goto :dirty
+rem git diff only sees tracked files, so a freshly added source file is not "dirty" --
+rem and that is exactly the file a tag would silently leave out. Porcelain includes it.
+git status --porcelain > "%TEMP%\cg-status.txt"
+for %%A in ("%TEMP%\cg-status.txt") do if %%~zA GTR 0 goto :dirty
 echo       branch: main, working tree clean
 
 git fetch -q origin
@@ -92,8 +92,8 @@ findstr /c:"const VERSION = \"%VER%\";" mcp-server\src\index.ts >nul
 if errorlevel 1 goto :mismatch
 echo       mcp-server/src/index.ts    %VER%  ok
 
-rem 1.20.1 那个构建从 mod/gradle.properties 读版本号，所以它自动一致 —— 说明一句，
-rem 免得有人以为这里漏了一处。
+rem mod-1.20.1 reads mod_version from mod/gradle.properties, so it stays consistent
+rem by construction -- stated here so nobody thinks a place was missed.
 echo       mod-1.20.1                 reads mod_version from mod/ (same %VER%)
 echo.
 goto :conflicts
