@@ -1,6 +1,6 @@
 {
   "name": "craftgraph-mcp",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "让 AI 查询 Minecraft 配方、构建配方树、规划产线的 MCP 服务器",
   "type": "module",

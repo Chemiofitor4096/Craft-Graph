@@ -245,10 +245,10 @@ public net.minecraft.world.item.crafting.SmithingTransformRecipe f_265949_ # tem
 ## 6. 版本号与产物命名
 
 两个 jar 共用同一个 `mod_version`（它们是一个产品的两半，
-分成 `1.20.1-0.2.2` 这种只会让人对着两个数字猜）。文件名区分：
+分成 `1.20.1-0.3.0` 这种只会让人对着两个数字猜）。文件名区分：
 
-- `craftgraph-0.2.2.jar`（1.21.1，保持不变，现有链接和校验都还指得上）
-- `craftgraph-0.2.2-mc1.20.1.jar`
+- `craftgraph-0.3.0.jar`（1.21.1，沿用原来的文件名形状）
+- `craftgraph-0.3.0-mc1.20.1.jar`
 
 Release workflow 现有的「tag 与 `mod_version` 一致」校验对两个 jar 都成立，不用改
 （但要把新 jar 一并挂上去）。真正的 MC 版本信息在两份 `mods.toml` 里，那才是 loader 看的。
