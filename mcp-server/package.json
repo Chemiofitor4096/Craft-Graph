@@ -19,7 +19,8 @@
     "compare": "tsx src/format-compare.ts",
     "contract": "tsx src/contract.ts",
     "live": "tsx src/live.ts",
-    "inspect": "tsx src/inspect.ts"
+    "inspect": "tsx src/inspect.ts",
+    "routes": "tsx src/routes.ts"
   },
   "engines": {
     "node": ">=20"
