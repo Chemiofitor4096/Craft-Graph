@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------ 1.21.1 / NeoForge
-  mod-1.21.1:
+  mod-neoforge:
     name: 构建 1.21.1 jar
     runs-on: ubuntu-latest
     # 与 ci.yml 同理：冷缓存下要下载并反编译 Minecraft，给个上限避免挂到 6 小时。
@@ -104,13 +104,19 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: craftgraph-1.21.1-jars
+          name: craftgraph-neoforge-jars
           path: mod/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
 
   # ------------------------------------------------------- 1.20.1 / MinecraftForge
-  mod-1.20.1:
+  #
+  # ⚠️ job id 里**不能有点**（GitHub 的约束是 [A-Za-z_][A-Za-z0-9_-]*）。
+  # 写成 mod-1.20.1 会让整个 workflow 文件失效，而症状很难往这边想：
+  # run 立刻失败、一个 job 都没有、workflow 名字变成文件路径，
+  # 本地拿任何 YAML 解析器看却都是好的。所以 job id 用 mod-forge / mod-neoforge，
+  # 版本号放在显示名（name:）里 —— 那个不受限。
+  mod-forge:
     name: 构建 1.20.1 jar
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -181,7 +187,7 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: craftgraph-1.20.1-jars
+          name: craftgraph-forge-jars
           path: mod-1.20.1/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
@@ -189,7 +195,7 @@ jobs:
   # ------------------------------------------------------------------ 建 Release
   release:
     name: 建 Release
-    needs: [mod-1.21.1, mod-1.20.1]
+    needs: [mod-neoforge, mod-forge]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
