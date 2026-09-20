@@ -16,19 +16,24 @@
 
 ## 项目形状
 
-三块，**职责不能混**：
+四块，**职责不能混**：
 
-- `mod/`（Java / NeoForge）—— 只做数据搬运：读游戏里的配方，归一化成 DTO，用本地 HTTP 发出去。
+- `mod/`（Java / NeoForge）—— 1.21.1 的壳：读游戏里的配方，归一化成 DTO，用本地 HTTP 发出去。
   **它跑在脆弱的环境里，越薄越好**；任何图算法放进去都没法脱离游戏测试，游戏一崩还连带挂掉。
+- `mod-1.20.1/`（Java / MinecraftForge）—— 同一个 Mod 的 1.20.1 版本变体。与 `mod/` 是
+  **两个独立 Gradle 构建**，共用 `core/` 那批源码，只有「读游戏对象」的部分各写一份。
+  改动几乎总是要**两边都改**（或先把共有的判断挪进 `core/`）—— 两个构建都必须绿。
 - `core/`（Java，**不含 Minecraft**）—— 算法与协议：标签还原、归一化、快照、本地 HTTP 服务。
   它是独立的 Gradle 工程，**存在的唯一目的是用编译器守住「这批代码不碰 MC」**：
   在 `mod/` 里 `import net.minecraft.*` 会编译过、测试也过，在 `core/` 里立刻编译失败。
-  `mod/` 用 `srcDir` 把这批源码编进自己的 jar，所以运行时是一个包。见 `core/build.gradle` 顶部。
+  两个 mod 工程都用 `srcDir` 把这批源码编进自己的 jar，所以运行时是一个包。
+  见 `core/build.gradle` 顶部；它以 **Java 17** 为目标（较低的那个版本决定下限）。
 - `mcp-server/`（TypeScript）—— 配方树、产线计算、缓存、MCP 工具。**算法全在这里**，
   所以能用 `shared/fixtures/` 的假数据完整测试，不需要启动游戏。
 
-**判断一段新代码该放哪**：会 `import net.minecraft.*` 吗 → `mod/`；不会 → `core/`。
-先按纯逻辑写、放进 `core/` 并加测试，等确实需要游戏数据了再往 `mod/` 挪。
+**判断一段新代码该放哪**：会 `import net.minecraft.*` 吗 → 放 `mod/`（并在 `mod-1.20.1/` 写对应的一份）；
+不会 → 放 `core/`。适配器里那些「判断」尤其要往 `core/` 挤 ——
+`RecipeTypeAdapter` 的签名被刻意做成只说我们自己的类型，就是为了让逻辑能共享、让每个版本只剩搬运。
 
 ---
 
@@ -97,13 +102,16 @@ npm run routes       # 选路质量诊断：叶子原料与整合度分布（**�
 
 # Java（不需要启动 Minecraft）
 cd mod
-./gradlew test       # JUnit
+./gradlew test       # JUnit（含 :core:test —— 子工程的任务名会一起匹配）
 ./gradlew build
-./gradlew runClient  # 起带 Mod 的游戏
+./gradlew runClient  # 起带 Mod 的游戏（1.21.1）
+
+cd ../mod-1.20.1     # 1.20.1 那个版本变体，需要 JDK 17
+./gradlew build      # 产物在 build/libs/craftgraph-<版本>-mc1.20.1.jar
 ```
 
-**顺序依赖**：`contract` 消费的样本由 Mod 的 `ContractDumpTest` 生成 →
-新克隆的仓库要先 `cd mod && ./gradlew test` 再 `npm run contract`。
+**两个版本都要绿**：共享的是 `core/`，MC 面各一份。只跑一个构建就以为改对了，
+是这条线最容易犯的错（另一侧的症状要到别人装了那个版本才出现）。
 
 ⚠️ **Gradle 构建缓存会让 `test` 不执行**：`BUILD SUCCESSFUL in 731ms` 那种就是命中缓存了，
 `ContractDumpTest` 没跑、样本不会刷新，而 `contract` 会报「样本过期」。
@@ -124,6 +132,8 @@ cd mod
 | 字段在真数据里有没有值 | `npm run live` |
 | 大包上的 opaque 比例 / 抽取耗时 | 用户自己的包（`npm run inspect` + 游戏日志里那行「主线程抽取 N ms」） |
 | 选路/解析改动的效果 | **离线**对比：真实包的快照若在 `~/.craftgraph/cache/`，起个临时脚本走 `RecipeStore.load` 就能在**用户真实数据**上跑前后对比，不需要游戏在运行 |
+| 1.20.1 那一侧能不能真跑 | **装了 1.20.1 Forge 的实例**。编译通过只证明 API 对得上，证明不了 AT 在运行时生效、也证明不了事件触发时机 —— 见下面那段 |
+| 构造期 / API 存不存在 | 用官方映射查（见 `doc/porting-1.20.1.md` 的方法），**别用 `grep … \| head`**：截断过一次，于是得出「这个方法不存在」的错误结论，还照着它设计了一版方案 |
 
 **改启发式之前先量，而且要量「全部」不能只看一两个案例**：这个项目里有两条候选规则
 （「偏好标签输入」「偏好被很多配方消耗的批量物品」）都是先想出来、再拿真实包量、结果被数据推翻的。

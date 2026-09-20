@@ -69,22 +69,31 @@ AI 查的是你**当前实际加载的整合包**的实时配方数据。
 
 | | |
 |---|---|
-| Minecraft | 1.21.1 |
-| 模组加载器 | NeoForge 21.1.x |
+| Minecraft | **1.21.1**（NeoForge 21.1.x）或 **1.20.1**（MinecraftForge 47.2.0+） |
 | 安装侧 | **客户端** —— Mod 从客户端读取，所以单人和多人存档都能用 |
 | Node.js | ≥ 20（MCP Server 需要） |
+
+两个 MC 版本各有一个 jar，按你的游戏版本选一个（装错版本游戏会直接报加载失败，不会静默不工作）。
 
 ## 安装
 
 两半，**两个都要装** —— 只放 jar 是问不出任何东西的，配方树和产线计算全在 Server 侧。
 
 **1. Mod** —— 从 [Releases 页面](https://github.com/Chemiofitor4096/Craft-Graph/releases)
-下载 `craftgraph-<版本>.jar` 放进 mods 目录。没有对应你游戏版本的 Release？自己构建：
+下载对应你游戏版本的那个放进 mods 目录：
+
+| 你的游戏 | 下载 |
+|---|---|
+| Minecraft 1.21.1 + NeoForge | `craftgraph-<版本>.jar` |
+| Minecraft 1.20.1 + Forge 47.2.0+ | `craftgraph-<版本>-mc1.20.1.jar` |
+
+没有对应你游戏版本的 Release？自己构建：
 
 ```bash
 git clone https://github.com/Chemiofitor4096/Craft-Graph.git
-cd Craft-Graph/mod && ./gradlew build
-# → mod/build/libs/craftgraph-*.jar  →  放进 .minecraft/mods/
+cd Craft-Graph/mod && ./gradlew build          # 1.21.1
+cd Craft-Graph/mod-1.20.1 && ./gradlew build   # 1.20.1（需要 JDK 17）
+# → mod/build/libs/craftgraph-*.jar  /  mod-1.20.1/build/libs/craftgraph-*-mc1.20.1.jar
 ```
 
 **2. MCP Server** —— 还没发布到 npm，从源码构建：
@@ -274,7 +283,10 @@ JEI 和 EMI 的 API 里根本没有「耗时」这个概念。
 
 **更早的测量来自近原版实例**（1290 条配方），本文里没标明的 token 数字都出自那里。
 
-**只支持 NeoForge 1.21.1。** 没有 Fabric，没有其他 Minecraft 版本。
+**支持 1.21.1（NeoForge）与 1.20.1（MinecraftForge 47.2.0+）。** 没有 Fabric，没有其他版本。
+
+1.20.1 那一侧是后来补的，共享同一套算法与协议（`core/`），请优先在 1.21.1 上验证过的功能为准 ——
+两个版本的已知差异记在 [doc/porting-1.20.1.md](doc/porting-1.20.1.md)。
 
 ## 许可
 

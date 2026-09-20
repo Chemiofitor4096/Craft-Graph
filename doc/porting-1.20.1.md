@@ -1,8 +1,10 @@
 # 1.20.1 版本：调查结论与方案
 
-**状态：第 0 步已落地（`core/` 已抽出，见第 3 节），其余仍是计划。**
-这里记的是「已核实的事实」和「决定」，不是已经发出去的版本 ——
-1.20.1 的 jar 目前还不存在。
+**状态：构建已完成（第 0~4 步），差真机验收与发布（第 5~6 步）。**
+`cd mod-1.20.1 && ./gradlew build` 能产出可发布的 jar
+（`build/libs/craftgraph-<版本>-mc1.20.1.jar`，已 reobfuscate）。
+**但它在真游戏里还没跑过** —— 编译通过只证明 API 对得上，
+证明不了 AT 在运行时生效、也证明不了事件触发时机。见第 5 节。
 
 写在前面：这份文档存在的原因是**这些东西重新查一遍很贵**。每一条都标了是
 核实过的（给了来源）还是推断的，请按同样的标准使用。
@@ -266,11 +268,84 @@ Release workflow 现有的「tag 与 `mod_version` 一致」校验对两个 jar 
 | 步 | 做什么 | 怎么算完成 | 状态 |
 |---|---|---|---|
 | 1 | 改 `RecipeTypeAdapter` 的签名：收/发我们自己的记录，而不是 `ItemStack`/`FluidStack`/`SizedFluidIngredient` | `core` 里能编过（签名里不再出现 MC 类型），且四层测试全绿 | **已完成**，见上 |
-| 2 | 把 `extract/` 里剩下的纯逻辑挪进 `core/`：序列组装的权重池归一化与 `sequence × loops` 展开、适配器匹配顺序的决策 | 那些测试在 `:core:test` 里跑，不启动游戏 | 待做 |
-| 3 | 建 `mod-1.20.1/`：`net.neoforged.moddev.legacyforge` + Forge 47.2.0 + Create 6.0.x；`mods.toml`、SRG 版 AT、无参构造函数、`MinecraftForge.EVENT_BUS` | `./gradlew build` 编过（编译器会逐条列出 API 差异） | 待做 |
-| 4 | 写 1.20.1 的 MC 侧 shim（`ItemIds` 的流体类型、`RecipeExtractor` 的 id/tag/`RegistryAccess`） | 同上 | 待做 |
+| 2 | 把 `extract/` 里剩下的纯逻辑挪进 `core/`：序列组装的权重池归一化与 `sequence × loops` 展开 | 那些测试在 `:core:test` 里跑，不启动游戏 | **已完成** |
+| 3 | 建 `mod-1.20.1/`：`legacyforge` + Forge 47.2.0 + Create 6.0.x；`mods.toml`、SRG 版 AT、无参构造函数、`MinecraftForge.EVENT_BUS` | `./gradlew build` 编过 | **已完成** |
+| 4 | 写 1.20.1 的 MC 侧 shim（`ItemIds` 的流体类型、`RecipeExtractor` 的 id/tag/`RegistryAccess`） | 同上 | **已完成** |
 | 5 | 进真游戏验收：`npm run live` + `npm run inspect`，并加上第 5 节那四条断言 | 覆盖度与 1.21.1 同量级；锻造与烹饪那几条断言通过 | 待做 |
 | 6 | 发布：同一个 `mod_version`，文件名带 MC 版本；Release 挂两个 jar | tag 校验对两个 jar 都成立 | 待做 |
 
 第 1、2 步都在**不新增任何 MC 代码**的情况下做，风险最低，而且做完之后 1.20.1 那一侧
 要写的就只剩「读 MC 对象」那一点点 —— 这也是先做这两步的理由。
+
+
+---
+
+## 8. 落地记录（第 2~4 步实际发生了什么）
+
+### 实际要改的 API 差异（编译器逐条列出来的）
+
+比预想的少。真正需要动代码的只有四处：
+
+| 位置 | 1.21.1 | 1.20.1 |
+|---|---|---|
+| 配方身份 | `manager.getRecipes()` → `Collection<RecipeHolder<?>>`，id 从 holder 取 | 没有 `RecipeHolder`：`getRecipeIds()` + `byKey(id)`，id 从 **map 的 key** 取 |
+| 注册表访问 | `HolderLookup.Provider` + `listTags()` | `RegistryAccess` + `registryOrThrow` / `getTagNames()` / `getTag(tagKey)` |
+| 流体原料 | NeoForge 的 `SizedFluidIngredient`（**总是存在**） | Forge 没有这个类；Create 用它自己的 `foundation.fluid.FluidIngredient`，所以拆 id 的活挪进了 `CreateFluids`（只被 Create 适配器引用，保住「没装 Create 不解析」） |
+| 入口 | 构造函数收 `(IEventBus, ModContainer)` | 无参构造函数 + `FMLJavaModLoadingContext.get().getModEventBus()` |
+
+`Recipe#getToastSymbol()`、`getResultItem(RegistryAccess)`、`BuiltInRegistries`、
+`getIngredient()` / `getSequence()` / `getLoops()` / `resultPool` 这些**在 1.20.1 上都有**，
+所以 `MachineTable`、`FieldCoverage`、两个 Create 适配器的主体逻辑一行没改。
+
+`ProcessingRecipe` 在 1.20.1 上只有**一个**类型参数（`<?>` 而不是 `<?, ?>`）。
+
+### 坑一：Create 在 1.20.1 上不发布无分类器的 jar
+
+`com.simibubi.create:create-1.20.1:6.0.8-291` **解析不了** —— 那个版本目录下只有
+`-all` / `-slim` / `-sources` / `-javadoc`，没有默认 jar。Gradle 的报错是
+「cannot be resolved」，而 `compileClasspath` 里仍然列着它（只是没有 jar），
+于是症状表现成一大片「程序包 com.simibubi.create… 不存在」，很容易往错的方向查。
+正确写法是带分类器：`...:6.0.8-291:slim`（选 slim：模组自己的类，all 还捆了 Flywheel）。
+**1.21.1 那条线反过来只有无分类器的 jar** —— 所以两个 build.gradle 在这点上不一样，不是笔误。
+
+### 坑二：AT 只能对 Minecraft 的类，而且我差点据此设计错方案
+
+一度以为 1.20.1 的 `SequencedAssemblyRecipe` 读不到（没有 `getSequence()`/`getIngredient()`），
+就写了 AT 到 Create 的类上。构建期直接失败：
+
+```
+access-transformer:missing-target: The target ...SequencedAssemblyRecipe FIELD ingredient does not exist
+```
+
+两层原因：一是这个校验**只看 Minecraft 的类**，模组类不在它视野里；
+二是**那个前提本身就是错的** —— 我那次 `grep` 用了 `head -30`，结论被截断了。
+完整看一遍：`getIngredient()` 在第 278 行、`getSequence()` 在第 282 行，都是 public。
+
+所以这一项与 1.21.1 一样走访问器，不需要任何特权。
+**教训**：查「某个 API 存不存在」时别让 `head` 决定结论；有官方映射可查时优先查映射。
+
+### 验证到了什么程度
+
+| 项 | 状态 |
+|---|---|
+| 编译（对着 Forge 47.2.0 + Create 6.0.8 的真实 jar） | ✅ 编译器逐条核对过 |
+| `core/` 的 148 个纯逻辑用例 | ✅ 两个构建各跑一遍 |
+| 版本自己的两个守卫测试（访问转换器、日志 ASCII） | ✅ |
+| `mods.toml` / `accesstransformer.cfg` 在 jar 里 | ✅ 就地断言过 |
+| **产物真的 reobfuscate 了** | ✅ 逐字节看过：发布 jar 里是 `m_175515_` / `m_203613_`，开发 jar 里是 `registryOrThrow` / `getTagNames` |
+| **在真游戏里能跑** | ❌ **没验过** —— 见下 |
+
+### 第 5 步要验什么（没验之前不要声称「1.20.1 支持」）
+
+1. **AT 在运行时是否生效**：编译期是 MDG 帮我们把字段变公开的，运行时是 FML 读
+   `META-INF/accesstransformer.cfg`。若它不生效，症状是那 27 条锻造配方又变回 opaque
+   （**不是崩溃**）。`npm run live` 里那两条锻造探针正是盯这个。
+2. **id 从 `byKey` 取是否可靠**：1.20.1 里 id 与配方对象是分开的，
+   断言「每条配方 id 非空且唯一」。
+3. **标签数量**：`getTagNames()` 若返回空（标签没绑定），标签还原会**静默退化**成物品列表。
+   live 层已有标签数量断言。
+4. **`RecipeExtractor` 里那处刻意的行为变化**（空栈从 `minecraft:air` 变成跳过）
+   在真实数据上的影响 —— 1.21.1 那边也没复核过，一次 `live` 两边都覆盖。
+
+跑法：在 1.20.1 + Forge 47.2.0+ 的实例里装上 `craftgraph-<版本>-mc1.20.1.jar`，
+进世界，然后 `cd mcp-server && npm run live`。

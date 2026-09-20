@@ -126,6 +126,13 @@ neoForge.ideSyncTask generateModMetadata
 // 那份独立的构建会让它立刻编译失败。见 core/build.gradle 顶部。
 sourceSets.main.java.srcDir '../core/src/main/java'
 
+// 把 core 这个子工程的产物收进本构建自己的 build/ 下。
+//
+// 默认它会写 core/build/，而 1.20.1 那个构建 include 的是同一个 projectDir，
+// 于是两个构建共用同一个输出目录 —— 而它们的编译目标不同（这边 release 21、那边 17），
+// 谁最后跑谁赢，并发跑更会互相覆盖。见 ../mod-1.20.1/build.gradle 里同一段。
+project(':core').layout.buildDirectory.set(layout.buildDirectory.dir('core'))
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 21

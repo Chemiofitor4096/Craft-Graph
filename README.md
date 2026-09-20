@@ -71,8 +71,7 @@ Handled deliberately, because they are where naive tools produce wrong answers:
 
 | | |
 |---|---|
-| Minecraft | 1.21.1 |
-| Mod loader | NeoForge 21.1.x |
+| Minecraft | **1.21.1** (NeoForge 21.1.x) or **1.20.1** (MinecraftForge 47.2.0+) |
 | Side | **Client** — the mod reads from the client, so singleplayer and multiplayer both work |
 | Node.js | ≥ 20 (for the MCP server) |
 
@@ -81,14 +80,22 @@ Handled deliberately, because they are where naive tools produce wrong answers:
 Two halves, and **you need both** — the jar alone cannot answer anything, because all the
 recipe-tree and planning logic lives in the server.
 
-**1. The mod** — download `craftgraph-<version>.jar` from the
-[Releases page](https://github.com/Chemiofitor4096/Craft-Graph/releases) and put it in your
-mods folder. No release for your version? Build it yourself:
+**1. The mod** — from the
+[Releases page](https://github.com/Chemiofitor4096/Craft-Graph/releases), download the jar for
+your game version and put it in your mods folder:
+
+| Your game | Download |
+|---|---|
+| Minecraft 1.21.1 + NeoForge | `craftgraph-<version>.jar` |
+| Minecraft 1.20.1 + Forge 47.2.0+ | `craftgraph-<version>-mc1.20.1.jar` |
+
+No release for your version? Build it yourself:
 
 ```bash
 git clone https://github.com/Chemiofitor4096/Craft-Graph.git
-cd Craft-Graph/mod && ./gradlew build
-# → mod/build/libs/craftgraph-*.jar  →  put it in .minecraft/mods/
+cd Craft-Graph/mod && ./gradlew build          # 1.21.1
+cd Craft-Graph/mod-1.20.1 && ./gradlew build   # 1.20.1 (needs JDK 17)
+# → mod/build/libs/craftgraph-*.jar  /  mod-1.20.1/build/libs/craftgraph-*-mc1.20.1.jar
 ```
 
 **2. The MCP server** — not published to npm yet, so build it from source:
@@ -299,7 +306,10 @@ budget, and the point where frame-slicing becomes necessary rather than optional
 **Earlier measurements come from a near-vanilla instance** (1,290 recipes), so token figures
 in this README are quoted from there unless stated otherwise.
 
-**NeoForge 1.21.1 only.** No Fabric, no other Minecraft versions.
+**Supports 1.21.1 (NeoForge) and 1.20.1 (MinecraftForge 47.2.0+).** No Fabric, no other versions.
+
+The 1.20.1 build shares the same algorithms and protocol (`core/`); known differences between
+the two are written down in [doc/porting-1.20.1.md](doc/porting-1.20.1.md).
 
 ## License
 

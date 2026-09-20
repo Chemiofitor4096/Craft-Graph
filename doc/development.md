@@ -19,9 +19,10 @@
 | `doc/protocol.md` | **Bridge HTTP API 契约** —— 两侧唯一的约定，改代码前先看这个 |
 | `doc/decisions.md` | 已锁定的技术决策及其代价 |
 | `doc/format-evaluation.md` | 输出格式的实测评估（含对紧凑 DSL 方案的评估） |
-| `doc/porting-1.20.1.md` | 1.20.1 版本的调查结论与方案（含已核实的 API 差异） |
+| `doc/porting-1.20.1.md` | 1.20.1 版本的调查结论、已核实的 API 差异与两个版本的差异清单 |
 | `mcp-server/` | TypeScript MCP 服务器：工具定义、配方树、产线计算 |
-| `mod/` | NeoForge 桥接 Mod：读配方、建索引、暴露本地 HTTP |
+| `mod/` | 1.21.1（NeoForge）桥接 Mod：读配方、建索引、暴露本地 HTTP |
+| `mod-1.20.1/` | 1.20.1（MinecraftForge 47.2.0+）版本变体，共享 `core/` |
 | `core/` | **不含 Minecraft** 的那一半：算法、协议 DTO、快照、本地 HTTP 服务 |
 | `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Java 测试生成（不提交） |
 
@@ -64,11 +65,18 @@ npm run inspect      # 配方覆盖度诊断：哪些配方类型读不懂、为
 npm run routes       # 选路质量诊断：首选路线里的叶子原料、整合度分布（改启发式之前先跑它）
 
 # Bridge Mod（Java）—— 不需要启动 Minecraft
-cd ../mod
-./gradlew test
+cd ../mod              # 1.21.1 / NeoForge
+./gradlew test         # 含 :core:test（子工程的任务名会一起匹配）
 ./gradlew build
-./gradlew runClient   # 启动带 Mod 的游戏
+./gradlew runClient    # 启动带 Mod 的游戏
+
+cd ../mod-1.20.1       # 1.20.1 / MinecraftForge —— 独立的构建，需要 JDK 17
+./gradlew build
 ```
+
+两个 MC 版本共享 `core/`（算法与协议），各自保留一份「读游戏对象」的代码。
+**改了一侧就想想另一侧**：共有判断该往 `core/` 挪，而不是抄一遍。
+两边都必须绿 —— CI 里是两个 job。
 
 四层各自负责不同的东西，**都不能省**：
 

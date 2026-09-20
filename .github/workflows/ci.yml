@@ -51,13 +51,18 @@ jobs:
       # 不如在这里明确失败并给出修复命令。
       - name: 检查 gradlew 可执行位
         run: |
-          if [ ! -x mod/gradlew ]; then
-            echo "::error::mod/gradlew 在 git 里不是可执行文件（应为 100755）。"
-            echo "::error::Linux/macOS 上克隆后 ./gradlew 会 Permission denied。"
-            echo "::error::修复：git update-index --chmod=+x mod/gradlew 然后提交。"
-            echo "::error::注意：Windows 上 core.filemode=false，git add 检测不到权限变化，提交前也不要 reset。"
-            exit 1
-          fi
+          # 两个工程各有自己的 wrapper（1.21.1 与 1.20.1 是两个独立的 Gradle 构建）。
+          FAILED=0
+          for W in mod/gradlew mod-1.20.1/gradlew; do
+            if [ ! -x "$W" ]; then
+              echo "::error::$W 在 git 里不是可执行文件（应为 100755）。"
+              echo "::error::Linux/macOS 上克隆后 ./gradlew 会 Permission denied。"
+              echo "::error::修复：git update-index --chmod=+x $W 然后提交。"
+              echo "::error::注意：Windows 上 core.filemode=false，git add 检测不到权限变化，提交前也不要 reset。"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
 
       # 这里只跑 build：它依赖 check，check 依赖 test，所以测试包含在内。
       # 这个 Mod 的测试不需要启动 Minecraft，CI 里跑得动。
@@ -91,6 +96,54 @@ jobs:
           path: shared/fixtures/bridge-dump/
           if-no-files-found: error
           retention-days: 1
+
+  # ------------------------------------------------- Mod（Minecraft 1.20.1）
+  #
+  # 与上面的 mod job 是**两个版本变体**：共享 core/ 那批算法，只有「读游戏对象」
+  # 的部分不同。这里是独立的 Gradle 构建，所以要单独跑一遍 —— 不跑的话这条线会悄悄烂掉。
+  #
+  # 三件与 1.21.1 不同、必须写清的事：
+  #
+  #   1. **JDK 17**，不是 21。1.20.1 的 Forge 跑在 17 上，工具链与编译目标都是 17。
+  #   2. 首次运行要下载 MCP 映射与 Forge 并反编译 Minecraft，冷缓存下明显更慢（超时给够）。
+  #   3. 产物是 **reobfuscate 过的**（Forge 1.20.1 运行时用 SRG 名）：未混淆的那个在
+  #      build/devlibs，build/libs 里那个才是发布用的 —— 由 ModDevGradle 自动安排。
+  mod-1.20.1:
+    name: Bridge Mod 1.20.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      # build 依赖 check → test，所以 :core:test（那 148 个纯逻辑用例）与
+      # 本工程自己的两个测试都包含在内。契约样本由 1.21.1 那个 job 负责生成，
+      # 两边跑的是同一份源码、写出同样的字节，不必重复上传。
+      - name: 构建与测试
+        working-directory: mod-1.20.1
+        run: ./gradlew build --no-daemon --stacktrace
+
+      # 产物自检：Forge 1.20.1 要的是 META-INF/mods.toml（不是 neoforge.mods.toml），
+      # 而访问转换器必须真的在 jar 里 —— 它写错时是**静默**的（锻造变回 opaque），
+      # 所以在 CI 里就地断言一下比等游戏里发现便宜。
+      - name: 校验产物（mods.toml 与访问转换器）
+        working-directory: mod-1.20.1
+        run: |
+          set -euo pipefail
+          JAR=$(ls build/libs/craftgraph-*-mc1.20.1.jar | head -1)
+          echo "检查 $JAR"
+          unzip -p "$JAR" META-INF/mods.toml | grep -q 'modLoader = "javafml"'
+          unzip -p "$JAR" META-INF/mods.toml | grep -q "modId = \"craftgraph\""
+          unzip -l "$JAR" | grep -q "META-INF/accesstransformer.cfg"
+          echo "产物自检通过"
 
   # ------------------------------------------------------------ MCP Server
   #

@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'craftgraph-1.20.1'
+
+// 共享核心：不含 Minecraft 的那一半，与 1.21.1 那个工程**同一批源码**。
+// 这个工程也独立跑一遍它的测试（`:core:test`），所以两个版本各自都能证明
+// 「共享代码在这边也是好的」。详见 core/build.gradle 顶部。
+include 'core'
+project(':core').projectDir = file('../core')

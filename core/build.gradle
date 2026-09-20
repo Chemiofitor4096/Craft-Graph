@@ -28,9 +28,13 @@ plugins {
 group = 'dev.craftgraph'
 version = '0.0.0'   // 不单独发布，版本号跟着 mod 走（mod_version）
 
-// 与 mod 工程一致：1.21.1 / 1.20.1 都是 Java 21 编译目标。
-// 两边必须一致 —— 同一份源码被编译两次，一边 release=21 一边 17 会掩盖真实的语法兼容问题。
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+// 编译目标 **17**，不是 21。
+//
+// 理由：1.20.1 的 Forge 跑在 Java 17 上，而这个工程被两个 mod 版本共用。
+// 定在较低的那个（17）意味着「核心代码不许用 21 才有的语法」这件事由编译器保证 ——
+// 否则症状是 1.21.1 一切正常、1.20.1 构建突然编不过，而那时改动早已提交。
+// 1.21.1 那边仍按 21 编译（它需要 21），17 编出来的字节在 21 上跑没有问题。
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 repositories {
     mavenCentral()
@@ -53,7 +57,7 @@ dependencies {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release = 21
+    options.release = 17
 }
 
 tasks.named('test', Test).configure {
