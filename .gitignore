@@ -42,3 +42,12 @@ config.local.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- 本机维护脚本（不进版本库）----
+#
+# live-check.bat / release.bat 是维护者本机的便利脚本：双击跑真机体检、
+# 或走一遍发布流程（推送 + tag + publish）。不进仓库的理由是它们绑定本机的
+# 路径与凭据习惯，而真正的发布流程在 .github/workflows/release.yml 里有权威版本 ——
+# 仓库里不需要第二份会过期的副本。
+live-check.bat
+release.bat
