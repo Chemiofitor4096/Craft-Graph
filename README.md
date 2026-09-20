@@ -137,9 +137,9 @@ repositories {
 
 dependencies {
     // Compile against the DTOs only. To also load the mod at runtime, put the jar in mods/.
-    compileOnly 'dev.craftgraph:craftgraph:0.3.1'            // Minecraft 1.21.1
+    compileOnly 'dev.craftgraph:craftgraph:0.3.2'            // Minecraft 1.21.1
     // The 1.20.1 build publishes under its own artifact id:
-    // compileOnly 'dev.craftgraph:craftgraph-mc1.20.1:0.3.1'
+    // compileOnly 'dev.craftgraph:craftgraph-mc1.20.1:0.3.2'
 }
 ```
 

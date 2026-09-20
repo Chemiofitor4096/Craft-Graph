@@ -245,10 +245,10 @@ public net.minecraft.world.item.crafting.SmithingTransformRecipe f_265949_ # tem
 ## 6. 版本号与产物命名
 
 两个 jar 共用同一个 `mod_version`（它们是一个产品的两半，
-分成 `1.20.1-0.3.1` 这种只会让人对着两个数字猜）。文件名区分：
+分成 `1.20.1-0.3.2` 这种只会让人对着两个数字猜）。文件名区分：
 
-- `craftgraph-0.3.1.jar`（1.21.1，沿用原来的文件名形状）
-- `craftgraph-0.3.1-mc1.20.1.jar`
+- `craftgraph-0.3.2.jar`（1.21.1，沿用原来的文件名形状）
+- `craftgraph-0.3.2-mc1.20.1.jar`
 
 Release workflow 现有的「tag 与 `mod_version` 一致」校验对两个 jar 都成立，不用改
 （但要把新 jar 一并挂上去）。真正的 MC 版本信息在两份 `mods.toml` 里，那才是 loader 看的。
@@ -324,7 +324,7 @@ access-transformer:missing-target: The target ...SequencedAssemblyRecipe FIELD i
 所以这一项与 1.21.1 一样走访问器，不需要任何特权。
 **教训**：查「某个 API 存不存在」时别让 `head` 决定结论；有官方映射可查时优先查映射。
 
-### 坑三：`mods.toml` 的依赖块用 `mandatory`，不是 `type`（真机才发现的）
+### 坑三：`mods.toml` 里两条**只有游戏会验**的约定（真机连踩两次）
 
 第一版 jar 装进真实的 1.20.1 + Forge 47.2.20 实例后，游戏在**扫描 mod 文件阶段**就拒收：
 
@@ -336,11 +336,33 @@ InvalidModFileException: Missing required field mandatory in dependency (craftgr
 （参照物不是记忆：直接读了他们整合包里 Create 0.5.1.j 的 `mods.toml`，以及游戏自带的
 `forge-1.20.1-47.2.20-universal.jar`。）
 
-这类差异的形状值得记住：**编译、测试、构建、CI 全过，只有游戏会拒**。
-症状还是「装了但游戏里没有这个 mod」，日志位置很靠前、很容易被忽略。
-所以两地都加了守卫（`ci.yml` 与 `release.yml`）：数 `[[dependencies.]]` 块数与
-`mandatory = true` 处数是否一一对应、并断言 `type =` 不出现；反过来 1.21.1 那份也数
-`type = "required"`。两边的检查都用真实产物正反面验证过。
+修完这一条之后**第二个错立刻露头**（同一个文件、同一类）：
+
+```
+Missing language javafml version [47.2.0,) wanted by craftgraph-0.3.1-mc1.20.1.jar, found 47
+ModLoadingException: Mod File ... needs language provider javafml:47.2.0 or above to load
+```
+
+`loaderVersion` 我填的是 **Forge 的版本**，而它指的是 **javafml 语言加载器**的版本 ——
+1.20.1 上就是 `47`。正确的值 `[47,)` 同样是从 Create 0.5.1.j 的 `mods.toml` 抄的。
+
+这类差异的形状值得记住：**编译、测试、构建、CI 全过，只有游戏会拒**，
+而且两次的报错都不指向「我们的文件写错了」，很容易先怀疑游戏环境或别的模组。
+所以现在有三道守卫：
+
+1. **单元测试**（`mod/src/test/.../ModMetadataTest.java` 与 `mod-1.20.1/.../ModMetadataTest.java`）：
+   锁死 `loaderVersion` 的值、依赖块用 `mandatory` 还是 `type`、
+   以及「会展开进 mods.toml 的值必须是 ASCII」。改错文件 → `./gradlew test` 直接失败。
+2. **CI / release 的产物校验**：数依赖块数与 `mandatory = true` 是否一一对应、断言 `type =` 不出现。
+3. 两处都用**真实产物正反面验证过**：真产物通过，把值改成踩过的那个 → 正确失败。
+
+**写守卫本身也踩了一次**：第一版 `loaderVersion` 断言写的是 `startsWith("[47")`，
+而它**放过了 `[47.2.0,)`** —— 也就是要拦的那个值本身。是「把坏值注进去看它失不失败」
+这个动作发现的。**守卫写宽了等于没写**，所以现在两条都是精确相等。
+
+流程上的教训：换一个 loader 目标时，`mods.toml` 应当**从该 loader 上能正常加载的真实模组抄**，
+再逐字段改 —— 而不是照着另一个 loader 的模板改。AT 那次我这么做了（抄了 JEI），
+`mods.toml` 这次没有，于是同一个文件栽了两次。
 
 ### 他们包里的 Create 是 0.5.1.j，不是 6.0.x
 

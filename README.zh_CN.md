@@ -133,9 +133,9 @@ repositories {
 
 dependencies {
     // 只在编译期用到 DTO 就写 compileOnly；要在运行时也加载这个 Mod，把 jar 放进 mods 目录
-    compileOnly 'dev.craftgraph:craftgraph:0.3.1'            // Minecraft 1.21.1
+    compileOnly 'dev.craftgraph:craftgraph:0.3.2'            // Minecraft 1.21.1
     // 1.20.1 那个产物用的是另一个 artifactId：
-    // compileOnly 'dev.craftgraph:craftgraph-mc1.20.1:0.3.1'
+    // compileOnly 'dev.craftgraph:craftgraph-mc1.20.1:0.3.2'
 }
 ```
 
