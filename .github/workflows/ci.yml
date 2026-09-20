@@ -65,8 +65,25 @@ jobs:
         working-directory: mod
         run: ./gradlew build --no-daemon --stacktrace
 
-      # 契约样本由 ContractDumpTest 生成，交给下面的 contract job 使用。
-      # 它刻意不提交进仓库（生成物），所以必须在这里显式传递。
+      # 契约样本由 ContractDumpTest 生成，而目录本身刻意不提交进仓库（见 .gitignore），
+      # 所以 fresh clone 里它不存在，必须由测试真的写出来 —— 这一步不能省。
+      #
+      # 为什么不能指望上面的 build 顺带生成（这条踩过，两次 CI 红都出在这里）：
+      # 只改了 TypeScript 的提交不会让 `:test` 的输入变化，setup-gradle 配的构建缓存
+      # 会让它直接 FROM-CACHE，测试不执行，样本目录从头到尾没被创建，
+      # 于是红的是下面那步 upload（no files found）—— 看起来像上传的问题，根因却在缓存。
+      #
+      # 在 mod/build.gradle 里把目录声明成 test 的产物，只能修好本地 up-to-date 判断；
+      # 缓存命中时会不会连带恢复产物属于 Gradle 内部细节，不该拿来赌。
+      #
+      # 所以这里无条件真跑一次，并且关掉缓存读写 —— 缓存一旦参与，
+      # "这一步到底跑没跑"就又要靠推理，而它的产物是给下一个 job 用的，必须确定。
+      # 跑全套而不是 --tests 过滤：过滤跑会把 test-results 覆盖成只剩一个类。
+      - name: 生成跨语言契约样本
+        working-directory: mod
+        run: ./gradlew test --rerun --no-build-cache --no-daemon
+
+      # 交给下面的 contract job 使用。
       - name: 上传跨语言契约样本
         uses: actions/upload-artifact@v4
         with:

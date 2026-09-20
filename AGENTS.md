@@ -102,6 +102,13 @@ cd mod
 `ContractDumpTest` 没跑、样本不会刷新，而 `contract` 会报「样本过期」。
 需要真跑时用 `./gradlew test --rerun-tasks --no-build-cache`。
 
+这个陷阱**在 CI 上更隐蔽**：只改 TypeScript 的提交不会让 `:test` 的输入变化，
+于是 `./gradlew build` 直接 FROM-CACHE，契约样本从未生成，
+红的是 `ci.yml` 里那步 upload（`no files found`）—— 看起来像上传坏了，其实根因是缓存。
+所以 CI 里紧跟 `build` 有一道无条件的 `./gradlew test --rerun --no-build-cache`。
+**给 test 加新的「写文件到仓库」副作用时，必须同时想清楚 CI 里它会不会被执行到**，
+或者更干脆：把那个目录声明成 `test` 的产物（`mod/build.gradle` 里有例子）。
+
 ### 什么验不了（别假装验过）
 
 | 东西 | 需要什么 |

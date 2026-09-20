@@ -160,6 +160,18 @@ tasks.named('test', Test).configure {
         exceptionFormat = 'full'
         showStandardStreams = false
     }
+
+    // 把契约样本目录声明成 test 的产物。
+    //
+    // 不声明的话，ContractDumpTest 写文件就是一次**未声明的副作用**，Gradle 对它是瞎的。
+    // 实测（删掉目录后 ./gradlew build）：`:test UP-TO-DATE`，9 秒 BUILD SUCCESSFUL，
+    // 目录**没有**被重建。CI 上是同一件事的更狠版本 —— 只改了 TypeScript 的提交
+    // 不会让 `:test` 的输入变化，于是它 FROM-CACHE，样本从未生成，而这一步的
+    // 表现是「构建成功、上传契约样本失败」，看起来像上传的问题，其实根因在这里。
+    //
+    // 声明之后就正常了：产物缺失会让 test 重新执行（或从构建缓存里连同产物一起恢复），
+    // 「样本在不在」从此是任务状态的一部分，而不是运气。
+    outputs.dir(layout.projectDirectory.dir('../shared/fixtures/bridge-dump'))
 }
 
 
