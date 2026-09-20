@@ -224,8 +224,7 @@ public final class RecipeExtractor {
         // 「产出为空」有两种原因，必须分开：适配器**读过该类型自己的产出字段**并确认空 =
         // 这条配方本来就不产出（燃料定义那种）；否则就是「读不到产出」。
         // 混为一谈会让 AI 把一条读不懂的配方说成「这配方不产出」。
-        RecipeTypeAdapter outputAdapter = RecipeAdapters.forRecipe(recipe);
-        boolean declaredNoOutput = outputAdapter != null && outputAdapter.declaresNoOutput(recipe);
+        boolean declaredNoOutput = RecipeAdapters.declaresNoOutput(recipe);
 
         Readability.Outcome verdict = Readability.outcome(inputCount, outputCount, opaque, declaredNoOutput);
         opaque = verdict == Readability.Outcome.OPAQUE;

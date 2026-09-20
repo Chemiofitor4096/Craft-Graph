@@ -70,6 +70,27 @@ jobs:
         working-directory: mod
         run: ./gradlew build --no-daemon --stacktrace
 
+      # 反向的那一半：1.21.1 用 neoforge.mods.toml，依赖块写 type="required"。
+      # 把 1.20.1 那套 mandatory 抄过来同样会让游戏拒收（NeoForge 认的是 type）。
+      # 两边都数一遍，是因为这两个文件长得很像、很容易互相抄错。
+      - name: 校验产物元数据形状（neoforge.mods.toml / type）
+        working-directory: mod
+        run: |
+          set -euo pipefail
+          JAR=$(ls build/libs/craftgraph-*.jar | grep -v sources | head -1)
+          TOML=$(mktemp)
+          unzip -p "$JAR" META-INF/neoforge.mods.toml > "$TOML"
+
+          BLOCKS=$(grep -c '^\[\[dependencies\.' "$TOML" || true)
+          REQUIRED=$(grep -cE '^[[:space:]]*type[[:space:]]*=[[:space:]]*"required"' "$TOML" || true)
+          if [ "$BLOCKS" -eq 0 ] || [ "$BLOCKS" != "$REQUIRED" ]; then
+            echo "::error::$JAR 里依赖块 $BLOCKS 个，而 type=\"required\" 只有 $REQUIRED 处"
+            echo "::error::NeoForge 1.21.1 每个依赖块都要 type=\"required\"（不是 mandatory=true）。"
+            cat "$TOML"
+            exit 1
+          fi
+          echo "依赖块形状正确：$BLOCKS 个块，$REQUIRED 处 type=required"
+
       # 契约样本由 ContractDumpTest 生成，而目录本身刻意不提交进仓库（见 .gitignore），
       # 所以 fresh clone 里它不存在，必须由测试真的写出来 —— 这一步不能省。
       #
@@ -134,6 +155,33 @@ jobs:
       - name: 构建与测试
         working-directory: mod-1.20.1
         run: ./gradlew build --no-daemon --stacktrace
+
+      # 依赖块的字段名是**只有游戏才会验**的那类差异，所以要在这里数一遍：
+      # Forge 1.20.1 每个 [[dependencies.*]] 都要 mandatory=true；写成 NeoForge 那套
+      # type="required" 时，编译、测试、构建全过，而游戏在扫描 mod 文件阶段直接拒收
+      #   InvalidModFileException: Missing required field mandatory in dependency
+      # 表现成「装了但这个 mod 不存在」—— 实测踩过一次。
+      - name: 校验产物元数据形状（mandatory / neoforge.mods.toml）
+        working-directory: mod-1.20.1
+        run: |
+          set -euo pipefail
+          JAR=$(ls build/libs/craftgraph-*-mc1.20.1.jar | head -1)
+          TOML=$(mktemp)
+          unzip -p "$JAR" META-INF/mods.toml > "$TOML"
+
+          BLOCKS=$(grep -c '^\[\[dependencies\.' "$TOML" || true)
+          MANDATORY=$(grep -cE '^[[:space:]]*mandatory[[:space:]]*=[[:space:]]*true' "$TOML" || true)
+          if [ "$BLOCKS" -eq 0 ] || [ "$BLOCKS" != "$MANDATORY" ]; then
+            echo "::error::$JAR 里依赖块 $BLOCKS 个，而 mandatory=true 只有 $MANDATORY 处"
+            echo "::error::Forge 1.20.1 每个依赖块都要 mandatory=true（不是 type=\"required\"）。"
+            cat "$TOML"
+            exit 1
+          fi
+          if grep -qE '^[[:space:]]*type[[:space:]]*=' "$TOML"; then
+            echo "::error::$JAR 的 mods.toml 里出现了 type= —— 那是 NeoForge 的写法，Forge 会拒收"
+            exit 1
+          fi
+          echo "依赖块形状正确：$BLOCKS 个块，$MANDATORY 处 mandatory"
 
       # 产物自检：Forge 1.20.1 要的是 META-INF/mods.toml（不是 neoforge.mods.toml），
       # 而访问转换器必须真的在 jar 里 —— 它写错时是**静默**的（锻造变回 opaque），

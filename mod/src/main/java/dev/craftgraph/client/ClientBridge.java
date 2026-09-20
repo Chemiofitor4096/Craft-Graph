@@ -10,6 +10,7 @@ import dev.craftgraph.bridge.BridgeService;
 import dev.craftgraph.bridge.DiscoveryFile;
 import dev.craftgraph.bridge.MainThreadDispatcher;
 import dev.craftgraph.extract.FieldCoverage;
+import dev.craftgraph.extract.RecipeAdapters;
 import dev.craftgraph.extract.RecipeExtractor;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
@@ -251,6 +252,15 @@ public final class ClientBridge {
                     LOGGER.warn("CraftGraph: getResultItem threw for {} recipes; their outputs will read as "
                                     + "unknown. That is a bug signal, not a normal condition.",
                             extractor.resultItemFailures());
+                }
+
+                // 适配器调用失败的次数。正常应为 0 —— 非 0 意味着「某个类型退回了通用读取」，
+                // 而通用读取对这些类型是**少信息**的（概率产出、耗时、机器都会缺），所以必须有声音。
+                if (RecipeAdapters.adapterFailures() > 0) {
+                    LOGGER.warn("CraftGraph: recipe adapter calls failed {} times; those recipes were read the "
+                                    + "generic way (probability outputs, duration or machine may be missing). "
+                                    + "Usually a mod version mismatch -- see the per-call warning above.",
+                            RecipeAdapters.adapterFailures());
                 }
 
                 if (extractor.toastSymbolFailures() > 0) {

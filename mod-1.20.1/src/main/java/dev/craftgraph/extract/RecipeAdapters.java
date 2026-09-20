@@ -55,6 +55,12 @@ public final class RecipeAdapters {
     /** 惰性构建，见类注释。抽取只在主线程做，所以不需要同步。 */
     private static List<RecipeTypeAdapter<Recipe<?>>> adapters;
 
+    /** 适配器调用失败次数，见 {@link #guarded}。 */
+    private static int adapterFailures;
+
+    /** 同一个失败最多打几条日志，避免刷屏（计数仍然照常累加）。 */
+    private static final int MAX_LOGGED_FAILURES = 3;
+
     private RecipeAdapters() {
     }
 
@@ -94,6 +100,58 @@ public final class RecipeAdapters {
         }
     }
 
+    /**
+     * 调用适配器，并在它抛异常时退回 {@code fallback} 而不是让异常逃出去。
+     *
+     * <h2>为什么必须有这一层</h2>
+     *
+     * 本类上面那段注释承诺了「一个模组出问题，后果是**少一个适配器**，
+     * 而不是整个快照建不出来」—— 但那只挡住了**类加载**（懒注册 + lambda）。
+     * 方法调用这一层原来没有保护：适配器在运行时抛出的任何异常
+     * （{@code NoSuchMethodError}、模组自己代码里的 NPE、某个畸形配方触发的
+     * {@code ClassCastException}）都会一路冒到 {@code ClientBridge.rebuild} 的兜底
+     * catch，结果是**整个桥接不可用** —— 而那正是这段注释说要避免的事。
+     *
+     * <p>现实里这个场景并不假：Create 在 1.20.1 上同时有 0.5.x 与 6.0.x 两条线，
+     * 我们只对着其中一条编译过。版本对不上时，能读到多少算多少、其余退回通用读取，
+     * 才是对的失败方式。
+     *
+     * <h2>为什么不是「禁用这个适配器」</h2>
+     *
+     * 一个坏配方不该让这个类型的所有配方都失去适配器（那可能是一万条）。
+     * 所以这里只跳过这一条，并把次数记下来 —— 由 {@link #adapterFailures()} 报进日志，
+     * 而覆盖度（{@code FieldCoverage}）会同时下降，所以它不是静默降级。
+     */
+    private static <T> T guarded(RecipeTypeAdapter<Recipe<?>> adapter, String what, Supplier<T> call, T fallback) {
+        try {
+            return call.get();
+        } catch (Throwable t) {
+            adapterFailures++;
+            if (adapterFailures <= MAX_LOGGED_FAILURES) {
+                LOGGER.warn("CraftGraph adapter call failed ({}); reading this recipe the generic way instead: {}",
+                        what, t.toString());
+            }
+            return fallback;
+        }
+    }
+
+    /** 适配器调用失败的次数。由 ClientBridge 打进日志 —— 降级必须有声音。 */
+    public static int adapterFailures() {
+        return adapterFailures;
+    }
+
+    /**
+     * 这条配方是不是「本来就不产出」（见 {@link RecipeTypeAdapter#declaresNoOutput}）。
+     *
+     * <p>单独包一个方法是为了让它也走 {@link #guarded}：异常时**返回 false**
+     * （而不是 true）—— 宁可把这条判成「读不懂」也不要凭空断言「它不产出」。
+     */
+    public static boolean declaresNoOutput(Recipe<?> recipe) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
+        if (adapter == null) return false;
+        return guarded(adapter, "declaresNoOutput", () -> adapter.declaresNoOutput(recipe), Boolean.FALSE);
+    }
+
     /** 找能处理这条配方的适配器。没有就返回 {@code null}。 */
     public static RecipeTypeAdapter<Recipe<?>> forRecipe(Recipe<?> recipe) {
         for (RecipeTypeAdapter<Recipe<?>> adapter : adapters()) {
@@ -109,7 +167,8 @@ public final class RecipeAdapters {
      */
     public static Integer duration(Recipe<?> recipe) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
-        return adapter == null ? null : adapter.duration(recipe);
+        if (adapter == null) return null;
+        return guarded(adapter, "duration", () -> adapter.duration(recipe), null);
     }
 
     /**
@@ -121,7 +180,7 @@ public final class RecipeAdapters {
     public static List<RawSlot> ingredients(Recipe<?> recipe, List<RawSlot> generic) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return generic;
-        List<RawSlot> override = adapter.ingredients(recipe);
+        List<RawSlot> override = guarded(adapter, "ingredients", () -> adapter.ingredients(recipe), null);
         return override == null ? generic : override;
     }
 
@@ -138,7 +197,7 @@ public final class RecipeAdapters {
     public static List<Models.ItemStack> results(Recipe<?> recipe, List<Models.ItemStack> generic) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return generic;
-        List<Models.ItemStack> override = adapter.results(recipe);
+        List<Models.ItemStack> override = guarded(adapter, "results", () -> adapter.results(recipe), null);
         return override == null ? generic : override;
     }
 
@@ -151,7 +210,7 @@ public final class RecipeAdapters {
     public static List<Models.ChanceOutput> chanceResults(Recipe<?> recipe) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<Models.ChanceOutput> out = adapter.chanceResults(recipe);
+        List<Models.ChanceOutput> out = guarded(adapter, "chanceResults", () -> adapter.chanceResults(recipe), null);
         return out == null ? List.of() : out;
     }
 
@@ -159,7 +218,7 @@ public final class RecipeAdapters {
     public static List<Models.FluidStack> fluidResults(Recipe<?> recipe) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<Models.FluidStack> out = adapter.fluidResults(recipe);
+        List<Models.FluidStack> out = guarded(adapter, "fluidResults", () -> adapter.fluidResults(recipe), null);
         return out == null ? List.of() : out;
     }
 
@@ -167,7 +226,7 @@ public final class RecipeAdapters {
     public static List<RawSlot> fluidIngredients(Recipe<?> recipe) {
         RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<RawSlot> out = adapter.fluidIngredients(recipe);
+        List<RawSlot> out = guarded(adapter, "fluidIngredients", () -> adapter.fluidIngredients(recipe), null);
         return out == null ? List.of() : out;
     }
 }

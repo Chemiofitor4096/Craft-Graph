@@ -245,10 +245,10 @@ public net.minecraft.world.item.crafting.SmithingTransformRecipe f_265949_ # tem
 ## 6. 版本号与产物命名
 
 两个 jar 共用同一个 `mod_version`（它们是一个产品的两半，
-分成 `1.20.1-0.3.0` 这种只会让人对着两个数字猜）。文件名区分：
+分成 `1.20.1-0.3.1` 这种只会让人对着两个数字猜）。文件名区分：
 
-- `craftgraph-0.3.0.jar`（1.21.1，沿用原来的文件名形状）
-- `craftgraph-0.3.0-mc1.20.1.jar`
+- `craftgraph-0.3.1.jar`（1.21.1，沿用原来的文件名形状）
+- `craftgraph-0.3.1-mc1.20.1.jar`
 
 Release workflow 现有的「tag 与 `mod_version` 一致」校验对两个 jar 都成立，不用改
 （但要把新 jar 一并挂上去）。真正的 MC 版本信息在两份 `mods.toml` 里，那才是 loader 看的。
@@ -324,6 +324,39 @@ access-transformer:missing-target: The target ...SequencedAssemblyRecipe FIELD i
 所以这一项与 1.21.1 一样走访问器，不需要任何特权。
 **教训**：查「某个 API 存不存在」时别让 `head` 决定结论；有官方映射可查时优先查映射。
 
+### 坑三：`mods.toml` 的依赖块用 `mandatory`，不是 `type`（真机才发现的）
+
+第一版 jar 装进真实的 1.20.1 + Forge 47.2.20 实例后，游戏在**扫描 mod 文件阶段**就拒收：
+
+```
+InvalidModFileException: Missing required field mandatory in dependency (craftgraph-0.3.0-mc1.20.1.jar)
+```
+
+原因是依赖块写成了 NeoForge 那套 `type = "required"`；Forge 1.20.1 要的是 `mandatory = true`。
+（参照物不是记忆：直接读了他们整合包里 Create 0.5.1.j 的 `mods.toml`，以及游戏自带的
+`forge-1.20.1-47.2.20-universal.jar`。）
+
+这类差异的形状值得记住：**编译、测试、构建、CI 全过，只有游戏会拒**。
+症状还是「装了但游戏里没有这个 mod」，日志位置很靠前、很容易被忽略。
+所以两地都加了守卫（`ci.yml` 与 `release.yml`）：数 `[[dependencies.]]` 块数与
+`mandatory = true` 处数是否一一对应、并断言 `type =` 不出现；反过来 1.21.1 那份也数
+`type = "required"`。两边的检查都用真实产物正反面验证过。
+
+### 他们包里的 Create 是 0.5.1.j，不是 6.0.x
+
+原先以为 1.20.1 这条线上大家都用 Create 6.0.x（maven 上确实有）。**实际整合包里是 0.5.1.j**，
+而我们是对着 6.0.8 编译的。所以直接反编译了他们那个 jar，逐个核对我们在调的方法：
+
+| 类 | 结果 |
+|---|---|
+| `ProcessingRecipe` | `getRollableResults` / `getProcessingDuration` / `getFluidResults` / `getFluidIngredients` 都在 |
+| `ProcessingOutput` | `getStack` / `getChance` 都在 |
+| `FluidIngredient` | `getMatchingFluidStacks` / `getRequiredAmount` 都在 |
+| `SequencedAssemblyRecipe` | `getIngredient` / `getSequence` / `getLoops` / `getTransitionalItem` 都在，`resultPool` 字段也在 |
+
+即**我们调的每一个方法都存在**，所以 0.5.1.j 上适配器应该能正常工作
+（`getResultItem` 不在那份 `javap` 输出里，是因为它在 MC 的 `Recipe` 接口上，属于继承来的）。
+
 ### 验证到了什么程度
 
 | 项 | 状态 |
@@ -333,7 +366,8 @@ access-transformer:missing-target: The target ...SequencedAssemblyRecipe FIELD i
 | 版本自己的两个守卫测试（访问转换器、日志 ASCII） | ✅ |
 | `mods.toml` / `accesstransformer.cfg` 在 jar 里 | ✅ 就地断言过 |
 | **产物真的 reobfuscate 了** | ✅ 逐字节看过：发布 jar 里是 `m_175515_` / `m_203613_`，开发 jar 里是 `registryOrThrow` / `getTagNames` |
-| **在真游戏里能跑** | ❌ **没验过** —— 见下 |
+| **在真游戏里能跑** | 🟡 **进行中**：第一次装进真实实例被 `mods.toml` 的依赖块字段挡下了（见坑三），已修；修完的新 jar 尚未复验 |
+| 依赖块形状（`mandatory` 而不是 `type`） | ✅ 真实产物正反面各验一次，并写进 CI/release 的产物校验 |
 
 ### 第 5 步要验什么（没验之前不要声称「1.20.1 支持」）
 
@@ -363,3 +397,21 @@ access-transformer:missing-target: The target ...SequencedAssemblyRecipe FIELD i
   （1.21.1 是 `neoforge-…`，1.20.1 是 `forge-…`），省得对着两份报告猜哪份是哪个。
 
 这三条对两个版本都成立，所以 1.21.1 也一起受益。
+
+
+### 顺带补上的一处防线：适配器调用失败不再带崩整个快照
+
+`RecipeAdapters` 一直写着「某个模组出问题，后果应该是**少一个适配器**，而不是整个快照建不出来」，
+但那句话原来只挡住了**类加载**（懒注册 + lambda）。方法调用这一层没有保护：
+适配器运行时抛出的任何异常（版本不匹配的 `NoSuchMethodError`、模组自己代码里的 NPE、
+某个畸形配方触发的 `ClassCastException`）都会一路冒到 `ClientBridge.rebuild` 的兜底 catch，
+结果是**整个桥接不可用** —— 正是那段注释说要避免的事。
+
+发现它的契机正是上面那件事：他们包里是 0.5.1.j 而我们对着 6.0.8 编译，
+于是「版本对不上时会发生什么」从假设变成了要考虑的真实场景。
+
+现在每个适配器调用都过一道 `guarded(...)`：失败就退回通用读取、把次数记下来，
+并由 `ClientBridge` 打进日志（`adapterFailures()`，与既有的
+`resultItemFailures` / `toastSymbolFailures` 同一套路）。没有采用「禁用整个适配器」，
+因为**一个坏配方不该让这个类型的一万条配方都失去适配器**；而覆盖度
+（`FieldCoverage`）会随之下降，所以它不是静默降级。

@@ -99,6 +99,17 @@ jobs:
             exit 1
           fi
 
+          # 反向的一半：NeoForge 认 type="required"，把 1.20.1 的 mandatory 抄过来同样会被拒收
+          NEO_TOML=$(mktemp)
+          unzip -p "$JAR" META-INF/neoforge.mods.toml > "$NEO_TOML"
+          NEO_BLOCKS=$(grep -c '^\[\[dependencies\.' "$NEO_TOML" || true)
+          NEO_REQUIRED=$(grep -cE '^[[:space:]]*type[[:space:]]*=[[:space:]]*"required"' "$NEO_TOML" || true)
+          if [ "$NEO_BLOCKS" -eq 0 ] || [ "$NEO_BLOCKS" != "$NEO_REQUIRED" ]; then
+            echo "::error::依赖块 $NEO_BLOCKS 个，type=\"required\" 只有 $NEO_REQUIRED 处"
+            cat "$NEO_TOML"
+            exit 1
+          fi
+
           echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / jar 内 metadata 一致"
 
       - name: 上传构建产物
@@ -182,7 +193,25 @@ jobs:
             exit 1
           fi
 
-          echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / mods.toml 与 AT 都在"
+          # 依赖块形状：Forge 1.20.1 要 mandatory=true，NeoForge 那套 type="required" 会被游戏拒收，
+          # 而编译、构建、CI 全过 —— 只有游戏会报
+          # "InvalidModFileException: Missing required field mandatory in dependency"。
+          # 实测踩过一次，所以这里数一遍块数与 mandatory 是否一一对应。
+          TOML=$(mktemp)
+          unzip -p "$JAR" META-INF/mods.toml > "$TOML"
+          BLOCKS=$(grep -c '^\[\[dependencies\.' "$TOML" || true)
+          MANDATORY=$(grep -cE '^[[:space:]]*mandatory[[:space:]]*=[[:space:]]*true' "$TOML" || true)
+          if [ "$BLOCKS" -eq 0 ] || [ "$BLOCKS" != "$MANDATORY" ]; then
+            echo "::error::依赖块 $BLOCKS 个，mandatory=true 只有 $MANDATORY 处"
+            cat "$TOML"
+            exit 1
+          fi
+          if grep -qE '^[[:space:]]*type[[:space:]]*=' "$TOML"; then
+            echo "::error::1.20.1 的 mods.toml 里出现了 type= —— Forge 会拒收"
+            exit 1
+          fi
+
+          echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / mods.toml、AT、依赖块形状都对"
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4

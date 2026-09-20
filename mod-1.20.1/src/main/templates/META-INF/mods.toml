@@ -14,9 +14,17 @@ description = '''把运行中的 Minecraft 配方数据通过本地 HTTP 暴露�
 
 # 只装在客户端。配方查看器（JEI/EMI）本身就是客户端模组，
 # 而配方数据在客户端也是全量的（原版靠它做配方书），所以没必要做成双端模组。
+# ⚠️ 1.20.1 的依赖块用 **mandatory = true**，不是 NeoForge 那套 `type = "required"`。
+#
+# 这条差异**编译期看不见、CI 的 grep 也看不见，只有游戏会拒**：
+# 写成 type 时 Forge 在扫描 mod 文件阶段就抛
+#   InvalidModFileException: Missing required field mandatory in dependency
+# 然后这个 jar 直接不被加载（症状是「装了但游戏里没有这个 mod」，日志在很靠前的位置）。
+# 参照物是真实的 1.20.1 模组（Create 0.5.1.j 的 mods.toml），不是记忆。
+# CI 里那道「校验产物」会数依赖块与 mandatory 是否一一对应，就是为了拦住这种手滑。
 [[dependencies.${mod_id}]]
 modId = "forge"
-type = "required"
+mandatory = true
 # [版本,) 区间写法：下界钉在编译时用的版本（47.2.0）。
 # 在最低版本上编译、允许更高版本运行，是这里刻意的选择（见 gradle.properties 的说明）。
 versionRange = "[${forge_version},)"
@@ -25,7 +33,7 @@ side = "CLIENT"
 
 [[dependencies.${mod_id}]]
 modId = "minecraft"
-type = "required"
+mandatory = true
 versionRange = "${minecraft_version_range}"
 ordering = "NONE"
 side = "CLIENT"
