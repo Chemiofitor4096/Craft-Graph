@@ -12,8 +12,10 @@ import net.minecraft.world.item.crafting.Recipe;
  * <p>判据是 {@code instanceof} 而不是类型 id 白名单，理由见
  * {@link RecipeTypeAdapter} 的类注释：模组复用原版烹饪序列化器时类型 id 是它自己的，
  * 但类没变，耗时照样读得到。
+ *
+ * <p>取值范围（0 不是「瞬间完成」）由 {@link TickDuration} 负责，这里只取数字。
  */
-final class CookingAdapter implements RecipeTypeAdapter {
+final class CookingAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
     @Override
     public boolean handles(Recipe<?> recipe) {
@@ -23,11 +25,6 @@ final class CookingAdapter implements RecipeTypeAdapter {
     @Override
     public Integer duration(Recipe<?> recipe) {
         if (!(recipe instanceof AbstractCookingRecipe cooking)) return null;
-
-        int ticks = cooking.getCookingTime();
-        // 0 或负数不是「瞬间完成」，而是没读到一个有意义的值。
-        // 返回 0 会被下游当成「不需要时间」，返回 null 才会被当成「未知」——
-        // 而且 0 会让 FieldCoverage 的检查失灵（它靠 null 发现适配器没生效）。
-        return ticks > 0 ? ticks : null;
+        return TickDuration.ofOrNull(cooking.getCookingTime());
     }
 }

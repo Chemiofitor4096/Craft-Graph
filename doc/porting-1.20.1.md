@@ -54,8 +54,12 @@ NeoForge 20.1 上找不到。
 核对手段：Mojang 官方的 1.20.1 client mappings（`piston-data.mojang.com` 上的 `client.txt`）。
 它给出 1.20.1 里**存在哪些类、哪些方法、签名是什么** —— 比凭记忆猜可靠。
 
-边界：16 个文件 / 2089 行完全不碰 MC（现在住在 `core/`），占 53%；
-碰 MC 的是 10 个文件 / 952 行 —— 移植的工作量全在这 952 行里。
+边界（用同一套算法量的：去掉空行与注释）：**不碰 MC 的 16 个文件 1125 行（54%）**，
+**碰 MC 的 10 个文件 952 行（46%）** —— 移植的工作量全在这 952 行里。
+
+> 更正：这里原先写的是「2089 行 / 53%」，那是我早先一次不同口径的统计，复现不出来。
+> 上面的数字来自 `git ls-tree` + 逐文件数（脚本可重跑），并且顺便验证了第 0 步是纯移动 ——
+> 抽取前后这两组数字一模一样。
 
 ### 2.1 好消息（原本担心、结果不用怕）
 
@@ -123,7 +127,7 @@ NeoForge 20.1 上找不到。
 
 | 方案 | 共享的是什么 | 代价 |
 |---|---|---|
-| **A. 薄核心** | 那 2089 行 MC-free 代码；`extract/` 整个按版本各一份 | 重复约 950 行，其中约 470 行是适配器/抽取逻辑，会各自漂移 |
+| **A. 薄核心** | 那 1125 行 MC-free 代码；`extract/` 整个按版本各一份 | 重复约 950 行，其中约 470 行是适配器/抽取逻辑，会各自漂移 |
 | **A+. 薄核心 + 纯函数上提** | A，外加把适配器里**已经纯的**部分（`ResultChance` 已经是）提到共享 | 几乎不额外花时间，但只捞回一小部分 |
 | **B. 适配器只说自己的类型** | `extract/` 里除「读 MC 对象」以外的全部（断言、概率分类、池子归一、过渡物品排除） | 要先改 `RecipeTypeAdapter` 的签名，让它收/发我们自己的 DTO 而不是 `ItemStack`/`FluidStack`/`SizedFluidIngredient`；共享比例升到大约八成，并且**顺手把流体那个洞补上** |
 
@@ -133,7 +137,7 @@ NeoForge 20.1 上找不到。
 
 ### 第 0 步已落地（2026-09-20）
 
-2089 行 MC-free 代码已经抽成 `core/`，它是**独立的 Gradle 工程**，由 `mod/settings.gradle`
+1125 行 MC-free 代码已经抽成 `core/`，它是**独立的 Gradle 工程**，由 `mod/settings.gradle`
 include 进来、`mod` 用 `srcDir` 把它的源码编进自己的 jar。
 
 做这一步时踩到一个值得记的坑：**ModDevGradle 会自己配置 `jar` 任务**，
@@ -151,7 +155,48 @@ mod 只剩 2 个类 / 4 个用例 —— 守访问转换器与日志文案的那
 而 `cd mod && ./gradlew test` 仍旧一条命令跑完两边（任务名会匹配子工程），
 CI 那一步（`test --rerun --no-build-cache`）也因此不用改。
 
-不管选哪条，**第 0 步都是同一件事**：把 2089 行 MC-free 代码抽成两边共享的源码集。
+### 为什么不是 jarJar
+
+MDG 确实支持 `jarJar project(':core')`，所以这是能做的。但它的**设计目的是第三方库的版本选择**：
+文档里那段是在讲「同一个库被多个 mod 各带一份、甚至版本不同，JiJ 得挑一份」，
+所以才要求你写 version range，还要求「嵌套 jar 的 Java 模块名全局唯一」。
+
+拿它装我们自己的源码集，代价是 `dev.craftgraph.*` 会**跨两个 jar**（mod 的 jar 里是
+`extract`/`client`，嵌套 jar 里是 `api`/`normalize`）—— 拆分包，生产环境的模块层要靠
+package aggregation 兜住；而我们并不需要版本隔离：这是我们自己的代码，只有一个版本。
+
+`srcDir` 得到的是同样的结果 —— 一个自包含的 jar（数过：54 个 class，两半都在），
+没有嵌套 jar、没有第二个模块名、没有拆分包。**将来真要打包第三方库（比如 JEI 的 API）时
+才该上 jarJar**，那是它擅长的场景。
+
+### 第 1 步已落地（2026-09-20）
+
+适配器接口搬进 `core` 并改成泛型 `RecipeTypeAdapter<T>`：参数是类型变量（1.21.1 填
+`Recipe<?>`，1.20.1 也填 `Recipe<?>`），返回值只说 `RawSlot` 与 `Models` 里的协议类型。
+配套新增：
+
+| 新增 | 是什么 |
+|---|---|
+| `RawSlot` | 版本无关的槽位（kind + 数量 + 一包 id）。流体在 1.20.1 上根本没有 `SizedFluidIngredient`，所以中间表示必须是纯字符串 |
+| `ExtractionContext` | 槽位归一化：按 kind 挑标签索引、表示不了就返回 null |
+| `TickDuration` | 「0 不是瞬间完成」这条规则原本写在三个适配器里互相引用，现在只有一处 |
+| `TransitionalItem` | 「全是中间产物才排除」的判据（用 id 比较，所以能住在 core 并单测） |
+| `ItemIds`（在 mod） | **MC 对象 → 我们的记录，这是每个 MC 版本唯一必须自己写的东西** |
+
+**行数没有变少**（碰 MC 的 952 → 955 行）：搬走的是**判断**，不是行数。
+真正的收益是 1.20.1 那边要写的从「适配器逻辑」缩到「`ItemIds` + 各访问器调用」——
+`SequencedAssemblyAdapter` 的权重池归一化、中间产物排除、耗时求和都不必再写第二遍。
+
+实测：core 13 个类 / 135 个用例（比第 0 步后多 12 个），mod 2 个类 / 4 个用例，
+四层（smoke/e2e/contract 与 Java 测试）全绿。
+
+**顺带发现一处假数据**：产出池里的空栈原先会经 `toItemStack` 变成
+`minecraft:air`（`Items.AIR` 在注册表里有 id，所以那个「取不到就写 unknown:unknown」
+的兜底其实没兜住），现在直接跳过。这会在边缘情况下改变 opaque 的判定
+（整个产出池都是空栈时，以前是「可读、产出是空气」，现在是「读不到产出」）——
+方向是对的（硬规则 1：宁可说读不到，也不要编），而**它需要 `live` 层在真实包上复核**。
+
+不管选哪条，**第 0 步都是同一件事**：把 1125 行 MC-free 代码抽成两边共享的源码集。
 这件事本身有价值：它让「哪些是 MC 面」变成目录结构上的事实，而不是靠 grep 才知道。
 
 ---
@@ -218,14 +263,14 @@ Release workflow 现有的「tag 与 `mod_version` 一致」校验对两个 jar 
 
 第 0 步（抽 `core/`）已完成，见上文。接下来按顺序：
 
-| 步 | 做什么 | 怎么算完成 |
-|---|---|---|
-| 1 | 改 `RecipeTypeAdapter` 的签名：收/发我们自己的记录，而不是 `ItemStack`/`FluidStack`/`SizedFluidIngredient` | `core` 里能编过（即签名里不再出现 MC 类型），且四层测试全绿 |
-| 2 | 把 `extract/` 里纯逻辑（概率分类、池子归一、过渡物品判据、适配器匹配的决策）挪进 `core/`，并补上它们的单元测试 | 那些测试在 `:core:test` 里跑，不启动游戏 |
-| 3 | 建 `mod-1.20.1/`：`net.neoforged.moddev.legacyforge` + Forge 47.2.0 + Create 6.0.x；`mods.toml`、SRG 版 AT、无参构造函数、`MinecraftForge.EVENT_BUS` | `./gradlew build` 编过（编译器会逐条列出 API 差异） |
-| 4 | 写 1.20.1 的 MC 侧 shim（`RecipeExtractor` 的 id/tag/RegistryAccess、流体的 Create 自有类型） | 同上 |
-| 5 | 进真游戏验收：`npm run live` + `npm run inspect`，并加上第 5 节那四条断言 | 覆盖度与 1.21.1 同量级；锻造与烹饪那几条断言通过 |
-| 6 | 发布：同一个 `mod_version`，文件名带 MC 版本；Release 挂两个 jar | tag 校验对两个 jar 都成立 |
+| 步 | 做什么 | 怎么算完成 | 状态 |
+|---|---|---|---|
+| 1 | 改 `RecipeTypeAdapter` 的签名：收/发我们自己的记录，而不是 `ItemStack`/`FluidStack`/`SizedFluidIngredient` | `core` 里能编过（签名里不再出现 MC 类型），且四层测试全绿 | **已完成**，见上 |
+| 2 | 把 `extract/` 里剩下的纯逻辑挪进 `core/`：序列组装的权重池归一化与 `sequence × loops` 展开、适配器匹配顺序的决策 | 那些测试在 `:core:test` 里跑，不启动游戏 | 待做 |
+| 3 | 建 `mod-1.20.1/`：`net.neoforged.moddev.legacyforge` + Forge 47.2.0 + Create 6.0.x；`mods.toml`、SRG 版 AT、无参构造函数、`MinecraftForge.EVENT_BUS` | `./gradlew build` 编过（编译器会逐条列出 API 差异） | 待做 |
+| 4 | 写 1.20.1 的 MC 侧 shim（`ItemIds` 的流体类型、`RecipeExtractor` 的 id/tag/`RegistryAccess`） | 同上 | 待做 |
+| 5 | 进真游戏验收：`npm run live` + `npm run inspect`，并加上第 5 节那四条断言 | 覆盖度与 1.21.1 同量级；锻造与烹饪那几条断言通过 | 待做 |
+| 6 | 发布：同一个 `mod_version`，文件名带 MC 版本；Release 挂两个 jar | tag 校验对两个 jar 都成立 | 待做 |
 
 第 1、2 步都在**不新增任何 MC 代码**的情况下做，风险最低，而且做完之后 1.20.1 那一侧
 要写的就只剩「读 MC 对象」那一点点 —— 这也是先做这两步的理由。

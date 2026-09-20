@@ -1,17 +1,14 @@
 package dev.craftgraph.extract;
 
 import com.simibubi.create.content.processing.recipe.ProcessingOutput;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedRecipe;
 
-import dev.craftgraph.extract.RecipeTypeAdapter.ChanceResult;
+import dev.craftgraph.api.Models;
 
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 
 import java.util.ArrayList;
@@ -75,7 +72,7 @@ import java.util.List;
  * <p><b>验证方式</b>同 {@link CreateAdapter}：需要装了 Create 的实例，
  * 本机 dev 实例没有，所以运行行为未被实测，只保证编译对着真实 jar 通过。
  */
-final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
+final class SequencedAssemblyAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
     /** 一个产出只吃 1 个基础物品。 */
     private static final int BASE_COUNT = 1;
@@ -86,26 +83,27 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<Ingredient> ingredients(Recipe<?> recipe) {
+    public List<RawSlot> ingredients(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;
 
-        List<Ingredient> out = new ArrayList<>();
+        List<RawSlot> out = new ArrayList<>();
         // 基础物品：一个产出吃一个
         for (int i = 0; i < BASE_COUNT; i++) {
-            out.add(assembly.getIngredient());
+            RawSlot base = ItemIds.itemSlot(assembly.getIngredient());
+            if (!base.isEmpty()) out.add(base);
         }
 
-        Item transitional = transitionalItem(assembly);
-        int loops = Math.max(1, assembly.getLoops());
+        String transitionalId = transitionalItemId(assembly);
+        int loops = loopsOf(assembly);
         for (SequencedRecipe<?> step : assembly.getSequence()) {
-            ProcessingRecipe<?, ?> stepRecipe = step.getRecipe();
-            for (Ingredient ingredient : stepRecipe.getIngredients()) {
-                if (ingredient.isEmpty()) continue;
+            for (Ingredient ingredient : step.getRecipe().getIngredients()) {
+                List<String> ids = ItemIds.items(ingredient);
+                if (ids.isEmpty()) continue;
                 // 中间产物不算原料，见类注释
-                if (isOnlyTransitionalItem(ingredient, transitional)) continue;
+                if (TransitionalItem.isOnlyTransitional(ids, transitionalId)) continue;
                 // 序列要走 loops 遍，所以每一步的原料也吃 loops 次
                 for (int i = 0; i < loops; i++) {
-                    out.add(ingredient);
+                    out.add(RawSlot.items(ids));
                 }
             }
         }
@@ -115,16 +113,18 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<SizedFluidIngredient> fluidIngredients(Recipe<?> recipe) {
+    public List<RawSlot> fluidIngredients(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;
 
-        int loops = Math.max(1, assembly.getLoops());
-        List<SizedFluidIngredient> out = new ArrayList<>();
+        int loops = loopsOf(assembly);
+        List<RawSlot> out = new ArrayList<>();
         for (SequencedRecipe<?> step : assembly.getSequence()) {
             for (SizedFluidIngredient fluidIngredient : step.getRecipe().getFluidIngredients()) {
                 if (fluidIngredient.ingredient().hasNoFluids()) continue;
+                RawSlot slot = ItemIds.fluidSlot(fluidIngredient);
+                if (slot.isEmpty()) continue;
                 for (int i = 0; i < loops; i++) {
-                    out.add(fluidIngredient);
+                    out.add(slot);
                 }
             }
         }
@@ -142,23 +142,21 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
     public Integer duration(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;
 
-        int loops = Math.max(1, assembly.getLoops());
         int total = 0;
         for (SequencedRecipe<?> step : assembly.getSequence()) {
             int stepTicks = step.getRecipe().getProcessingDuration();
             if (stepTicks > 0) total += stepTicks;
         }
-        total *= loops;
-        return total > 0 ? total : null;
+        return TickDuration.ofOrNull(total * loopsOf(assembly));
     }
 
     @Override
-    public List<ItemStack> results(Recipe<?> recipe) {
+    public List<Models.ItemStack> results(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;
 
         // 产出必然由我说了算：getResultItem() 返回的是权重池的第一个元素，
         // 拿它当必然产出会漏掉「你有可能掷到废料」这件事。
-        List<ItemStack> guaranteed = new ArrayList<>();
+        List<Models.ItemStack> guaranteed = new ArrayList<>();
         for (PoolEntry entry : normalisePool(assembly)) {
             if (entry.kind() == ResultChance.Kind.GUARANTEED) guaranteed.add(entry.stack());
         }
@@ -166,13 +164,13 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<ChanceResult> chanceResults(Recipe<?> recipe) {
+    public List<Models.ChanceOutput> chanceResults(Recipe<?> recipe) {
         if (!(recipe instanceof SequencedAssemblyRecipe assembly)) return null;
 
-        List<ChanceResult> out = new ArrayList<>();
+        List<Models.ChanceOutput> out = new ArrayList<>();
         for (PoolEntry entry : normalisePool(assembly)) {
             if (entry.kind() == ResultChance.Kind.PROBABILISTIC) {
-                out.add(new ChanceResult(entry.stack(), entry.probability()));
+                out.add(new Models.ChanceOutput(entry.stack(), entry.probability()));
             }
         }
         return out.isEmpty() ? null : out;
@@ -180,7 +178,7 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
 
     // ---------------------------------------------------------------- 权重池
 
-    private record PoolEntry(ItemStack stack, float probability, ResultChance.Kind kind) {
+    private record PoolEntry(Models.ItemStack stack, float probability, ResultChance.Kind kind) {
     }
 
     /**
@@ -190,6 +188,8 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
      * 这里只负责把 {@code Infinity} / {@code NaN} 的权重排除出**权重和**：
      * 它们自己经归一化后会各自判成必然产出，但不能让它们把和变成 Infinity，
      * 否则其他所有条目都会被算成 0。
+     *
+     * <p>空栈的条目直接丢掉，而不是报一个空物品出去 —— 见 {@link ItemIds#stack}。
      */
     private List<PoolEntry> normalisePool(SequencedAssemblyRecipe assembly) {
         float totalWeight = 0f;
@@ -206,8 +206,8 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
         List<PoolEntry> out = new ArrayList<>();
         for (ProcessingOutput entry : pool) {
             if (entry == null) continue;
-            ItemStack stack = entry.getStack();
-            if (stack == null || stack.isEmpty()) continue;
+            Models.ItemStack stack = ItemIds.stack(entry.getStack());
+            if (stack == null) continue;
 
             ResultChance.Kind kind = ResultChance.classifyWeight(entry.getChance(), totalWeight);
             if (kind == ResultChance.Kind.NEVER) continue;
@@ -223,24 +223,13 @@ final class SequencedAssemblyAdapter implements RecipeTypeAdapter {
 
     // ---------------------------------------------------------------- 小工具
 
-    private static Item transitionalItem(SequencedAssemblyRecipe assembly) {
-        ItemStack transitional = assembly.getTransitionalItem();
-        return (transitional == null || transitional.isEmpty()) ? null : transitional.getItem();
+    /** 序列至少走一遍 —— 0 或负数会让所有原料都消失。 */
+    private static int loopsOf(SequencedAssemblyRecipe assembly) {
+        return Math.max(1, assembly.getLoops());
     }
 
-    /**
-     * 这个槽位是不是「只接受中间产物」。
-     *
-     * <p>判据是**全都**是中间产物才排除，而不是「含有它就排除」：
-     * 万一某个槽位是「中间产物 + 别的可选物」，含有就排除会把真实原料一起丢掉。
-     */
-    private static boolean isOnlyTransitionalItem(Ingredient ingredient, Item transitional) {
-        if (transitional == null) return false;
-        ItemStack[] items = ingredient.getItems();
-        if (items.length == 0) return false;
-        for (ItemStack stack : items) {
-            if (stack.getItem() != transitional) return false;
-        }
-        return true;
+    private static String transitionalItemId(SequencedAssemblyRecipe assembly) {
+        ItemStack transitional = assembly.getTransitionalItem();
+        return ItemIds.itemId(transitional);
     }
 }

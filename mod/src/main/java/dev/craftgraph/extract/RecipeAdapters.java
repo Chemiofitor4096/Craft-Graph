@@ -2,18 +2,14 @@ package dev.craftgraph.extract;
 
 import com.mojang.logging.LogUtils;
 
-import dev.craftgraph.extract.RecipeTypeAdapter.ChanceResult;
-
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
+import dev.craftgraph.api.Models;
 import net.minecraft.world.item.crafting.Recipe;
 import net.neoforged.fml.ModList;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * 适配器登记处：按配方对象挑一个能读它特有字段的适配器。
@@ -43,26 +39,30 @@ import java.util.List;
  * <p>外面还包了一层 {@code catch (Throwable)}：万一将来某个模组的类加载出了别的问题
  * （版本不匹配、依赖缺失），后果应该是「少一个适配器」，
  * 而不是「整个快照建不出来」。这个项目对「一个坏配方带崩整条链路」是有教训的。
+ *
+ * <p>本类住在 {@code mod} 而适配器接口住在 {@code core}，是因为这里要用
+ * {@link ModList} 与 {@code Recipe<?>}（都是 MC/loader 类型）；
+ * 接口本身只谈我们自己的类型，所以两边能分开。
  */
 public final class RecipeAdapters {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /** 惰性构建，见类注释。抽取只在主线程做，所以不需要同步。 */
-    private static List<RecipeTypeAdapter> adapters;
+    private static List<RecipeTypeAdapter<Recipe<?>>> adapters;
 
     private RecipeAdapters() {
     }
 
-    private static List<RecipeTypeAdapter> adapters() {
+    private static List<RecipeTypeAdapter<Recipe<?>>> adapters() {
         if (adapters == null) {
-            List<RecipeTypeAdapter> list = new ArrayList<>();
+            List<RecipeTypeAdapter<Recipe<?>>> list = new ArrayList<>();
             list.add(new CookingAdapter());
             list.add(new SmithingAdapter());
-            addIfLoaded(list, "create", "Create", () -> new CreateAdapter());
+            addIfLoaded(list, "create", "Create", CreateAdapter::new);
             // 序列组装不是 ProcessingRecipe 的子类，所以是另一个适配器。
             // 两个都在同一个 isLoaded 判断下 —— 它们共用一份 Create 软依赖。
-            addIfLoaded(list, "create", "Create（序列组装）", () -> new SequencedAssemblyAdapter());
+            addIfLoaded(list, "create", "Create（序列组装）", SequencedAssemblyAdapter::new);
             adapters = List.copyOf(list);
         }
         return adapters;
@@ -74,11 +74,11 @@ public final class RecipeAdapters {
      * <p>传的是个 lambda 而不是实例：把 `new XxxAdapter()` 留在 lambda 里，
      * 类的解析就推迟到 lambda 被调用时 —— 这正是「没装就不解析」的实现方式。
      */
-    private static void addIfLoaded(List<RecipeTypeAdapter> list, String modId, String displayName,
-                                    java.util.function.Supplier<RecipeTypeAdapter> factory) {
+    private static void addIfLoaded(List<RecipeTypeAdapter<Recipe<?>>> list, String modId, String displayName,
+                                    Supplier<RecipeTypeAdapter<Recipe<?>>> factory) {
         if (!ModList.get().isLoaded(modId)) return;
         try {
-            RecipeTypeAdapter adapter = factory.get();
+            RecipeTypeAdapter<Recipe<?>> adapter = factory.get();
             list.add(adapter);
             LOGGER.debug("CraftGraph enabled the {} recipe adapter", displayName);
         } catch (Throwable t) {
@@ -91,8 +91,8 @@ public final class RecipeAdapters {
     }
 
     /** 找能处理这条配方的适配器。没有就返回 {@code null}。 */
-    public static RecipeTypeAdapter forRecipe(Recipe<?> recipe) {
-        for (RecipeTypeAdapter adapter : adapters()) {
+    public static RecipeTypeAdapter<Recipe<?>> forRecipe(Recipe<?> recipe) {
+        for (RecipeTypeAdapter<Recipe<?>> adapter : adapters()) {
             if (adapter.handles(recipe)) return adapter;
         }
         return null;
@@ -104,20 +104,20 @@ public final class RecipeAdapters {
      * @return 游戏刻；没有适配器能处理、或适配器读不到时返回 {@code null}
      */
     public static Integer duration(Recipe<?> recipe) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         return adapter == null ? null : adapter.duration(recipe);
     }
 
     /**
-     * 读输入槽位。
+     * 读输入槽位（物品）。
      *
-     * @param generic 通用接口（{@code getIngredients()}）读出来的结果
+     * @param generic 通用接口（{@code getIngredients()}）读出来的槽位
      * @return 适配器给的槽位；没有适配器能处理、或适配器声明「不归我管」时返回 {@code generic}
      */
-    public static List<Ingredient> ingredients(Recipe<?> recipe, List<Ingredient> generic) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+    public static List<RawSlot> ingredients(Recipe<?> recipe, List<RawSlot> generic) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return generic;
-        List<Ingredient> override = adapter.ingredients(recipe);
+        List<RawSlot> override = adapter.ingredients(recipe);
         return override == null ? generic : override;
     }
 
@@ -131,10 +131,10 @@ public final class RecipeAdapters {
      * @param generic 通用接口（{@code getResultItem()}）读出来的产物
      * @return 最终产物列表；可能是空的，表示确定读不到产出
      */
-    public static List<ItemStack> results(Recipe<?> recipe, List<ItemStack> generic) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+    public static List<Models.ItemStack> results(Recipe<?> recipe, List<Models.ItemStack> generic) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return generic;
-        List<ItemStack> override = adapter.results(recipe);
+        List<Models.ItemStack> override = adapter.results(recipe);
         return override == null ? generic : override;
     }
 
@@ -144,26 +144,26 @@ public final class RecipeAdapters {
      * <p>这个方法没有「通用回退」——原版和 NeoForge 都没有任何接口能给出带概率的产出，
      * 它只存在于各模组自己的字段里。所以返回空列表就是「没有」，不存在歧义。
      */
-    public static List<ChanceResult> chanceResults(Recipe<?> recipe) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+    public static List<Models.ChanceOutput> chanceResults(Recipe<?> recipe) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<ChanceResult> out = adapter.chanceResults(recipe);
+        List<Models.ChanceOutput> out = adapter.chanceResults(recipe);
         return out == null ? List.of() : out;
     }
 
     /** 读流体输出。同样没有通用回退。 */
-    public static List<FluidStack> fluidResults(Recipe<?> recipe) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+    public static List<Models.FluidStack> fluidResults(Recipe<?> recipe) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<FluidStack> out = adapter.fluidResults(recipe);
+        List<Models.FluidStack> out = adapter.fluidResults(recipe);
         return out == null ? List.of() : out;
     }
 
     /** 读流体输入。同样没有通用回退。 */
-    public static List<SizedFluidIngredient> fluidIngredients(Recipe<?> recipe) {
-        RecipeTypeAdapter adapter = forRecipe(recipe);
+    public static List<RawSlot> fluidIngredients(Recipe<?> recipe) {
+        RecipeTypeAdapter<Recipe<?>> adapter = forRecipe(recipe);
         if (adapter == null) return List.of();
-        List<SizedFluidIngredient> out = adapter.fluidIngredients(recipe);
+        List<RawSlot> out = adapter.fluidIngredients(recipe);
         return out == null ? List.of() : out;
     }
 }

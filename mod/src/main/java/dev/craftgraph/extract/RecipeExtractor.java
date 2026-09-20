@@ -2,7 +2,6 @@ package dev.craftgraph.extract;
 
 import dev.craftgraph.api.Models;
 import dev.craftgraph.normalize.Humanize;
-import dev.craftgraph.normalize.IngredientNormalizer;
 import dev.craftgraph.normalize.Readability;
 import dev.craftgraph.normalize.TagIndex;
 import net.minecraft.core.Holder;
@@ -16,29 +15,27 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 把 Minecraft 的配方翻译成协议 DTO。
  *
- * <h2>这是整个 Mod 里唯一接触 Minecraft API 的地方</h2>
+ * <h2>这一层只做搬运，判断都在别处</h2>
  *
  * 它刻意做得非常薄：**所有判断逻辑都委托给已经测过的纯 Java 类**
- * （{@link TagIndex}、{@link IngredientNormalizer}）。
- * 这里只负责「把 MC 的对象取出来、变成字符串和数字」。
+ * （{@link ExtractionContext} 负责槽位归一化与标签还原、
+ * {@link RecipeTypeAdapter} 的实现负责各配方类型的字段、
+ * {@link MachineTable} 负责机器推断），这里只负责
+ * 「把 MC 的对象按 id 取出来」和「按协议拼起来」。
  *
  * 这么分的理由：MC API 的细节（方法名、返回类型）编译器能验证，
  * 但**语义**不能 —— 比如「Ingredient.getItems() 返回的到底是不是标签成员」。
- * 把语义判断集中到可测试的地方，这里剩下的就只是搬运。
+ * 把语义判断集中到能测试的地方，这里剩下的就只是搬运。
  *
  * <h2>类型特有的字段交给 {@code extract} 包里的适配器</h2>
  *
@@ -58,7 +55,7 @@ import java.util.Set;
  *   <li>{@code Recipe#getResultItem} 对模组机器配方是否返回有意义的值
  *       （很多模组配方返回 {@code ItemStack.EMPTY}，那不代表它不产出东西）</li>
  *   <li>{@code Ingredient#getItems()} 对「任意物品」这类槽位会不会返回上千项
- *       （{@link IngredientNormalizer#MAX_UNEXPLAINED_OPTIONS} 会把它判成读不懂）</li>
+ *       （{@code IngredientNormalizer.MAX_UNEXPLAINED_OPTIONS} 会把它判成读不懂）</li>
  *   <li>配方数量是否符合预期（跟 JEI/EMI 显示的数量对比）</li>
  *   <li>{@code instanceof AbstractCookingRecipe} 是否真的匹配那 4 种烹饪配方 ——
  *       这是 {@link CookingAdapter} 唯一的判据，而它需要真实的 MC 类才能验证，
@@ -72,8 +69,7 @@ public final class RecipeExtractor {
     /** 配方类型 id 缓存：RecipeType → id 的映射查一次不贵，但每条配方都查就没必要。 */
     private final Map<Object, String> typeIdCache = new LinkedHashMap<>();
 
-    private final TagIndex itemTags;
-    private final TagIndex fluidTags;
+    private final ExtractionContext context;
 
     /**
      * 注册表访问。**必须传给 {@code getResultItem}，不能传 null。**
@@ -95,9 +91,8 @@ public final class RecipeExtractor {
     /** 字段覆盖度。由 ClientBridge 打进日志 —— 「字段悄悄全是 null」必须留下痕迹。 */
     private final FieldCoverage coverage = new FieldCoverage();
 
-    private RecipeExtractor(TagIndex itemTags, TagIndex fluidTags, HolderLookup.Provider registries) {
-        this.itemTags = itemTags;
-        this.fluidTags = fluidTags;
+    private RecipeExtractor(ExtractionContext context, HolderLookup.Provider registries) {
+        this.context = context;
         this.registries = registries;
     }
 
@@ -108,8 +103,9 @@ public final class RecipeExtractor {
      */
     public static RecipeExtractor create(HolderLookup.Provider registries) {
         return new RecipeExtractor(
-                buildTagIndex(registries, Registries.ITEM),
-                buildTagIndex(registries, Registries.FLUID),
+                new ExtractionContext(
+                        buildTagIndex(registries, Registries.ITEM),
+                        buildTagIndex(registries, Registries.FLUID)),
                 registries);
     }
 
@@ -164,19 +160,12 @@ public final class RecipeExtractor {
 
         // 输入槽位走适配器：有些配方类（锻造）通用接口返回空列表，但字段里其实有。
         // 声明「不归我管」的适配器会返回 null，这里就落回通用接口的结果。
-        for (Ingredient ingredient : RecipeAdapters.ingredients(recipe, recipe.getIngredients())) {
-            if (ingredient.isEmpty()) continue;
+        for (RawSlot slot : RecipeAdapters.ingredients(recipe, genericItemSlots(recipe))) {
+            if (slot.isEmpty()) continue;
 
-            // getItems() 给出这个槽位接受的所有物品 —— 但**不告诉你它原本是不是标签**。
-            // 反查标签表来还原，见 TagIndex 的注释。
-            // 注意：1.21.1 里 getItems() 返回的是 ItemStack[]（数组，不是 Stream）。
-            Set<String> itemIds = new LinkedHashSet<>();
-            for (ItemStack stack : ingredient.getItems()) {
-                ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-                if (itemId != null) itemIds.add(itemId.toString());
-            }
-
-            Models.Ingredient normalized = IngredientNormalizer.normalize("item", 1, new ArrayList<>(itemIds), itemTags);
+            // 归一化（含标签还原）是 core 里的决定：它知道按 kind 挑哪张标签索引，
+            // 也知道表示不了时该返回 null。这里只负责把 null 变成「整条配方 opaque」。
+            Models.Ingredient normalized = context.normalize(slot);
             if (normalized == null) {
                 // 表示不了这个槽位。整条配方标记为读不懂 —— 这比塞一份
                 // 「看起来精确、实际荒谬」的原料表安全得多。
@@ -189,17 +178,9 @@ public final class RecipeExtractor {
         // 流体输入。漏掉它不会报错，只会让原料表看起来完整却少了东西 ——
         // Create 的 compacting 是「燧石×2 + 砂砾 + 100mB 岩浆」，少了岩浆玩家会照着建错产线。
         // 数量单位是 mB，复用同一套标签还原逻辑（流体也有标签，比如 #c:lava）。
-        for (SizedFluidIngredient fluidIngredient : RecipeAdapters.fluidIngredients(recipe)) {
-            Set<String> fluidIds = new LinkedHashSet<>();
-            for (FluidStack stack : fluidIngredient.ingredient().getStacks()) {
-                if (stack.isEmpty()) continue;
-                ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(stack.getFluid());
-                if (fluidId != null) fluidIds.add(fluidId.toString());
-            }
-            if (fluidIds.isEmpty()) continue;
-
-            Models.Ingredient normalized = IngredientNormalizer.normalize(
-                    Models.Ingredient.KIND_FLUID, fluidIngredient.amount(), new ArrayList<>(fluidIds), fluidTags);
+        for (RawSlot slot : RecipeAdapters.fluidIngredients(recipe)) {
+            if (slot.isEmpty()) continue;
+            Models.Ingredient normalized = context.normalize(slot);
             if (normalized == null) {
                 opaque = true;
                 break;
@@ -216,31 +197,19 @@ public final class RecipeExtractor {
         // 先取通用接口的结果再交给适配器：适配器返回 null 表示「用这个」，
         // 返回空列表表示「这个不对，别报出去」。纹饰锻造要的正是后者 ——
         // getResultItem() 在那里返回硬编码的铁胸甲占位符。
-        List<ItemStack> genericResults = new ArrayList<>();
-        ItemStack result = safeResultItem(recipe);
-        if (result != null && !result.isEmpty()) {
+        List<Models.ItemStack> genericResults = new ArrayList<>();
+        Models.ItemStack result = ItemIds.stack(safeResultItem(recipe));
+        if (result != null) {
             genericResults.add(result);
         }
 
-        List<Models.ItemStack> outputs = new ArrayList<>();
-        for (ItemStack stack : RecipeAdapters.results(recipe, genericResults)) {
-            outputs.add(toItemStack(stack));
-        }
+        List<Models.ItemStack> outputs = RecipeAdapters.results(recipe, genericResults);
 
         // 概率产出与流体产出。三者相加才是「这条配方到底产出什么」——
         // 只数必然产出的话，Create 的洗涤配方（产出全是 chance: 0.25 / 0.05）
         // 会被判成「读不到产出」而整条被产线计算跳过。
-        List<Models.ChanceOutput> chanceOutputs = new ArrayList<>();
-        for (RecipeTypeAdapter.ChanceResult chance : RecipeAdapters.chanceResults(recipe)) {
-            chanceOutputs.add(new Models.ChanceOutput(toItemStack(chance.stack()), chance.chance()));
-        }
-
-        List<Models.FluidStack> fluidOutputs = new ArrayList<>();
-        for (FluidStack stack : RecipeAdapters.fluidResults(recipe)) {
-            ResourceLocation fluidId = BuiltInRegistries.FLUID.getKey(stack.getFluid());
-            if (fluidId == null) continue;
-            fluidOutputs.add(new Models.FluidStack(fluidId.toString(), stack.getAmount()));
-        }
+        List<Models.ChanceOutput> chanceOutputs = RecipeAdapters.chanceResults(recipe);
+        List<Models.FluidStack> fluidOutputs = RecipeAdapters.fluidResults(recipe);
 
         // 用统一的判定规则。注意它也检查「没有输入」—— 真实配方不可能不消耗东西，
         // 所以无输入一定是「读不到输入」。只看产出的话，盔甲纹饰锻造会变成
@@ -355,8 +324,19 @@ public final class RecipeExtractor {
         return coverage;
     }
 
-    private static Models.ItemStack toItemStack(ItemStack stack) {
-        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        return new Models.ItemStack(id != null ? id.toString() : "unknown:unknown", stack.getCount(), null);
+    /**
+     * 通用接口（{@code getIngredients()}）读出来的输入槽位。
+     *
+     * <p>空槽位在这里就滤掉：{@code RawSlot} 允许「一个候选都没有」的形态，
+     * 但那种槽位对下游没有意义，混进原料表只会让 AI 以为有一个位置要填。
+     */
+    private static List<RawSlot> genericItemSlots(Recipe<?> recipe) {
+        List<RawSlot> out = new ArrayList<>();
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (ingredient.isEmpty()) continue;
+            RawSlot slot = ItemIds.itemSlot(ingredient);
+            if (!slot.isEmpty()) out.add(slot);
+        }
+        return out;
     }
 }

@@ -1,10 +1,6 @@
 package dev.craftgraph.extract;
 
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.Recipe;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
+import dev.craftgraph.api.Models;
 
 import java.util.List;
 
@@ -28,6 +24,19 @@ import java.util.List;
  * 而单元测试全绿 —— 因为夹具里手写了 duration。
  * **「测试全绿但功能是死的」就是这么来的。**
  *
+ * <h2>界面为什么是泛型的，而且只说我们自己的类型</h2>
+ *
+ * 这个接口**必须**碰到配方对象（它的全部意义就是读通用接口读不到的字段），
+ * 所以参数是一个类型变量 {@code T}：1.21.1 那边填 {@code Recipe<?>}，
+ * 1.20.1 那边也是 —— 但接口本身因此不依赖任何 Minecraft 类型，
+ * 能住在不含 MC 的 {@code core} 工程里，也就跟着一起被测试覆盖。
+ *
+ * <p>更实际的理由是流体：1.21.1 的流体原料是 NeoForge 的
+ * {@code SizedFluidIngredient}，而 Forge 1.20.1 **根本没有那个类**
+ * （Create 在 1.20.1 上用自己那套 {@code FluidIngredient}）。
+ * 返回值一旦写死成某个版本的 MC 类型，适配器的逻辑就只能跟着版本分叉；
+ * 现在返回的是 {@link RawSlot} 与 {@link Models} 里的协议类型，两边都能用。
+ *
  * <h2>判据用「是什么类」而不是「类型 id 是什么」</h2>
  *
  * 这一点是刻意的：模组加一台「合金熔炉」并复用原版的烹饪序列化器时，
@@ -47,27 +56,30 @@ import java.util.List;
  *
  * <p>{@link #duration} 没有这个区分 —— 它只返回 null 表示读不到（协议里
  * 「未知为 null」），因为不存在「耗时确定为空」这种情况。
+ *
+ * @param <T> 这个版本/平台的配方对象类型（如 {@code Recipe<?>}）
  */
-public interface RecipeTypeAdapter {
+public interface RecipeTypeAdapter<T> {
 
     /** 这个适配器能不能处理这条配方。 */
-    boolean handles(Recipe<?> recipe);
+    boolean handles(T recipe);
 
     /**
      * 耗时，单位游戏刻（20 刻 = 1 秒）。
      *
-     * @return 读不到时为 {@code null}
+     * @return 读不到时为 {@code null}。<b>不要返回 0 或负数</b> —— 那会被下游当成
+     *         「瞬间完成」，而真相是「没读到有意义的值」
      */
-    default Integer duration(Recipe<?> recipe) {
+    default Integer duration(T recipe) {
         return null;
     }
 
     /**
-     * 输入槽位。通用接口读不到（或读不对）时由适配器提供。
+     * 输入槽位（物品）。通用接口读不到（或读不对）时由适配器提供。
      *
      * @return {@code null} 表示用通用接口的结果；空列表表示确定读不到输入
      */
-    default List<Ingredient> ingredients(Recipe<?> recipe) {
+    default List<RawSlot> ingredients(T recipe) {
         return null;
     }
 
@@ -78,7 +90,7 @@ public interface RecipeTypeAdapter {
      *         空列表表示确定读不到产出 —— 上层会标 opaque，
      *         而不是把 {@code getResultItem} 的占位符当成真产物
      */
-    default List<ItemStack> results(Recipe<?> recipe) {
+    default List<Models.ItemStack> results(T recipe) {
         return null;
     }
 
@@ -89,9 +101,10 @@ public interface RecipeTypeAdapter {
      * 混在一起会让「必然产出 1 个」被当成「期望 1 个」——看起来一样，语义不同，
      * 而概率不是 1 时就会直接把产量算错。
      *
-     * @return {@code null} 表示没有概率产出；概率必须落在 (0, 1) 开区间
+     * @return {@code null} 表示没有概率产出；概率必须落在 (0, 1) 开区间，
+     *         分类交给 {@link ResultChance}（纯逻辑、有单测）
      */
-    default List<ChanceResult> chanceResults(Recipe<?> recipe) {
+    default List<Models.ChanceOutput> chanceResults(T recipe) {
         return null;
     }
 
@@ -100,7 +113,7 @@ public interface RecipeTypeAdapter {
      *
      * @return {@code null} 表示没有
      */
-    default List<FluidStack> fluidResults(Recipe<?> recipe) {
+    default List<Models.FluidStack> fluidResults(T recipe) {
         return null;
     }
 
@@ -113,7 +126,7 @@ public interface RecipeTypeAdapter {
      *
      * @return {@code null} 表示没有流体输入
      */
-    default List<SizedFluidIngredient> fluidIngredients(Recipe<?> recipe) {
+    default List<RawSlot> fluidIngredients(T recipe) {
         return null;
     }
 
@@ -140,16 +153,7 @@ public interface RecipeTypeAdapter {
      * 返回 true 时上层会把它标成「不产出」而不是「读不懂」，所以这是一个**断言**，
      * 要能对得起它。
      */
-    default boolean declaresNoOutput(Recipe<?> recipe) {
+    default boolean declaresNoOutput(T recipe) {
         return false;
-    }
-
-    /**
-     * 一个概率产出。
-     *
-     * @param stack  产出的物品
-     * @param chance 概率，必须落在 (0, 1) 开区间 —— 边界由 {@link ResultChance} 判过
-     */
-    record ChanceResult(ItemStack stack, float chance) {
     }
 }
