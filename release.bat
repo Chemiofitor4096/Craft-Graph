@@ -119,7 +119,7 @@ if not errorlevel 1 goto :tagexists
 echo       git tag v%VER%                 not present  ok
 
 curl -s -o "%TEMP%\cg-maven.xml" -w "%%{http_code}" "https://maven.kessokuteatime.work/releases/dev/craftgraph/craftgraph/maven-metadata.xml" >"%TEMP%\cg-http.txt" 2>nul
-set /p HTTP=<"%TEMP%\cg-http.txt" "%TEMP%\cg-maven2.xml" "%TEMP%\cg-http2.txt"
+set /p HTTP=<"%TEMP%\cg-http.txt"
 if not "%HTTP%"=="200" goto :mavenunknown
 findstr /c:"<version>%VER%</version>" "%TEMP%\cg-maven.xml" >nul
 if not errorlevel 1 goto :mavenexists
