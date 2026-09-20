@@ -1,0 +1,70 @@
+// CraftGraph 共享核心 —— **这个工程里没有 Minecraft**
+//
+// 为什么它要是一个独立的 Gradle 工程，而不是「mod 里的一个目录」：
+//
+// 这一侧的代码全是算法和协议（配方索引、归一化、标签还原、HTTP 服务、快照 DTO），
+// 它们的价值恰恰在于**能脱离游戏测试** —— 用 shared/fixtures 的假数据就能完整跑，
+// 不需要启动 Minecraft。而这件事如果只是个约定，就一定会有人不小心 `import net.minecraft.*`
+// 进来，而且**编译得过、测试也过**（因为在 mod 工程里 MC 就在类路径上），
+// 直到某天有人想在没有游戏的机器上跑测试才发现。
+//
+// 做成独立工程之后，这件事由编译器保证：这里的类路径上没有任何 Minecraft / NeoForge，
+// 混进来的第一行就会被 `compileJava` 拦下。这是把「哪一半是纯的」从约定变成事实。
+//
+// 两半的关系：mod 工程（以及将来的 1.20.1 工程）把 ../core/src/main/java 用 `srcDir`
+// 当成自己主源码集的一部分编进来 —— 所以核心的 class 天然在那个 mod 的 jar 里，
+// 运行时 dev.craftgraph.* 是一个包，不存在跨 jar 拆分包的问题。
+//
+// 为什么不写成 `implementation project(':core')` 再把 class 合并进 jar：那样要跟
+// ModDevGradle 争 jar 任务的配置权，而它会静默覆盖掉（实测过：
+// `jar { from project(':core')... }` 写完，jar 里一个核心 class 都没有，sources jar 反倒有）。
+// 本工程存在的意义只有一条 —— **在没有 Minecraft 的类路径上编译和测试这批源码**，
+// 所以它不必参与打包。
+
+plugins {
+    id 'java-library'
+}
+
+group = 'dev.craftgraph'
+version = '0.0.0'   // 不单独发布，版本号跟着 mod 走（mod_version）
+
+// 编译目标 **17**，不是 21。
+//
+// 理由：1.20.1 的 Forge 跑在 Java 17 上，而这个工程被两个 mod 版本共用。
+// 定在较低的那个（17）意味着「核心代码不许用 21 才有的语法」这件事由编译器保证 ——
+// 否则症状是 1.21.1 一切正常、1.20.1 构建突然编不过，而那时改动早已提交。
+// 1.21.1 那边仍按 21 编译（它需要 21），17 编出来的字节在 21 上跑没有问题。
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Gson 在运行时由游戏自带（mod 工程从 Minecraft 的依赖里拿到），
+    // 所以这里只用于编译，不进产物依赖。
+    //
+    // 版本必须和游戏实际用的一致（Minecraft 1.21.1 是 2.10.1，由它的 strictly 约束锁定）。
+    // 换别的版本会让 JsonTest 变成「测了一个游戏里根本不存在的 Gson」——
+    // 那个测试的意义正是验证游戏自带那版支持 record 与 serializeNulls。
+    compileOnly 'com.google.code.gson:gson:2.10.1'
+    testImplementation 'com.google.code.gson:gson:2.10.1'
+
+    testImplementation platform('org.junit:junit-bom:5.14.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat = 'full'
+        showStandardStreams = false
+    }
+}

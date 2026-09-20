@@ -1,6 +1,6 @@
 package dev.craftgraph.extract;
 
-import net.minecraft.world.item.ItemStack;
+import dev.craftgraph.api.Models;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
@@ -54,7 +54,7 @@ import java.util.List;
  * <p><b>验证方式</b>：{@code instanceof} 派发需要真实的 MC 类，而测试源码集看不到
  * Minecraft，所以这一环由 {@code npm run live} 在真游戏上断言（见 live.ts 的锻造段）。
  */
-final class SmithingAdapter implements RecipeTypeAdapter {
+final class SmithingAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
     @Override
     public boolean handles(Recipe<?> recipe) {
@@ -62,20 +62,32 @@ final class SmithingAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<Ingredient> ingredients(Recipe<?> recipe) {
+    public List<RawSlot> ingredients(Recipe<?> recipe) {
         // 三个字段是包私有的，靠 accesstransformer.cfg 变公开。
         // 顺序按 JEI 的做法：template / base / addition。
+        //
+        // 1.20.1 上这三行的字段名要换成 SRG 名（见 doc/porting-1.20.1.md），
+        // 但「按 template/base/addition 顺序取三个槽位」这件事不变。
+        Ingredient template;
+        Ingredient base;
+        Ingredient addition;
         if (recipe instanceof SmithingTransformRecipe r) {
-            return List.of(r.template, r.base, r.addition);
+            template = r.template;
+            base = r.base;
+            addition = r.addition;
+        } else if (recipe instanceof SmithingTrimRecipe r) {
+            template = r.template;
+            base = r.base;
+            addition = r.addition;
+        } else {
+            return null;
         }
-        if (recipe instanceof SmithingTrimRecipe r) {
-            return List.of(r.template, r.base, r.addition);
-        }
-        return null;
+        // 空槽位不在这里滤掉：滤除的判据属于上层（它还要顺便决定要不要因此标 opaque）。
+        return List.of(ItemIds.itemSlot(template), ItemIds.itemSlot(base), ItemIds.itemSlot(addition));
     }
 
     @Override
-    public List<ItemStack> results(Recipe<?> recipe) {
+    public List<Models.ItemStack> results(Recipe<?> recipe) {
         if (recipe instanceof SmithingTrimRecipe) {
             // 坚决不用 getResultItem()：那是硬编码的铁胸甲占位符。
             // 空列表 → 上层标 opaque，AI 会被告知「产出读不到」而不是拿到一个假答案。

@@ -1,0 +1,240 @@
+// CraftGraph Bridge Mod —— Minecraft 1.20.1 / MinecraftForge 构建配置
+//
+// 与 ../mod/build.gradle（1.21.1 / NeoForge）是**两个版本变体**，不是两个项目：
+// 算法与协议那一半（core/）是同一批源码，这里只有「读游戏对象」的部分不同。
+//
+// 三条来自官方文档、值得先知道的事（ModDevGradle LEGACY.md）：
+//
+//   1. 1.20.1 的 Forge 用 **SRG 名称**作为运行时名，所以产物必须 reobfuscate ——
+//      这个插件会**自动**配置 jar 任务：未混淆的那个挪到 build/devlibs，
+//      build/libs 里放的是 reobf 之后的（发布要用的就是它）。
+//   2. 模组依赖要走 `modCompileOnly` 这类配置，插件会把它们从 SRG 重映射到官方名；
+//      这些配置**不传递**，模组自己的依赖得手动加。
+//   3. 访问转换器里，**成员必须是 SRG 名**（类名仍写官方名）。
+
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.neoforged.moddev.legacyforge' version '2.0.147'
+    id 'idea'
+}
+
+// 版本号只有一处定义：从 mod/ 那边读。
+//
+// 两个 jar 是同一产品的两个版本变体，各自维护一个 mod_version 只会让人
+// 对着两个数字猜哪个是新的（AGENTS.md 的规则），而且 Release 的 tag 校验
+// 也只认 mod/gradle.properties 那一处。
+def sharedProps = new Properties()
+file('../mod/gradle.properties').withInputStream { sharedProps.load(it) }
+def sharedModVersion = sharedProps.getProperty('mod_version')
+
+version = sharedModVersion
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// 文件名区分版本：同一个 mod_version，靠 classifier 说明它给哪个 MC。
+// 不带 classifier 的那个是 1.21.1（既有链接与校验都还指得上）。
+//
+// withSourcesJar() 必须在这两句之前：它才是注册 sourcesJar 任务的那一步，
+// 而 tasks.named() 找不到任务时会立刻失败（不是延迟到执行期）。
+java.withSourcesJar()
+
+tasks.named('jar', Jar) {
+    archiveClassifier = 'mc1.20.1'
+}
+tasks.named('sourcesJar', Jar) {
+    archiveClassifier = 'mc1.20.1-sources'
+}
+
+// 1.20.1 跑在 **Java 17** 上（不是 21）。共享代码因此也必须能编到 17，
+// core/ 自己的构建也是 release 17，那边编得过这边就一定编得过。
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+repositories {
+    // 软依赖的模组在这里取编译期 API。**都是 modCompileOnly**：
+    // 只用来让编译器核对我们的调用是否与真实 API 一致，产物里不包含它、也不依赖它。
+    maven {
+        name = 'CreateMod'
+        url = 'https://maven.createmod.net'
+    }
+}
+
+legacyForge {
+    version = "${minecraft_version}-${forge_version}"
+
+    // AT 条目写错（字段改名、拼错）时构建期就失败。
+    // 不校验的话症状是「启动时崩」或者「锻造又变回 27 条 opaque」——
+    // 后者尤其难查，因为它看起来跟「本来就这样」一模一样。
+    validateAccessTransformers = true
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+
+    mods {
+        // 这一句把主源码集注册成 mod 的内容来源。名字必须和 mod_id 一致。
+        craftgraph {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// 共享核心（不含 Minecraft 的那一半）。与 mod/ 用的是同一批文件，
+// 用 srcDir 编进这个工程自己的 jar，理由见 core/build.gradle 顶部。
+sourceSets.main.java.srcDir '../core/src/main/java'
+
+// core 是 include 进来的子工程，默认会把产物写进 core/build/ —— 而 1.21.1 那个构建
+// 也把同一个目录当自己的输出目录（两个构建 include 的是同一个 projectDir）。
+// 两个构建的编译目标不同（这边 release 17、那边 21），共用输出目录意味着
+// 谁最后跑谁赢，而且**并发跑时会互相覆盖**（Gradle 的 up-to-date 判断挡不住另一个进程在写）。
+// 所以把它挪进本构建自己的 build/ 下面 —— 顺带也被 .gitignore 覆盖了。
+project(':core').layout.buildDirectory.set(layout.buildDirectory.dir('core'))
+
+// 把 gradle.properties 里的 mod 元信息注入到 mods.toml。
+// 1.20.1 用 META-INF/mods.toml（1.21.1 那边是 neoforge.mods.toml）。
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            forge_version          : forge_version,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            // 版本号来自共享定义，见上面读 mod/gradle.properties 那段
+            mod_version            : sharedModVersion,
+            mod_authors            : mod_authors,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+
+    // 显式指定 UTF-8，不依赖 JVM 默认字符集：模板里有中文（Mod 描述），
+    // 靠默认值的话哪天有人用 -Dfile.encoding 跑构建就会变乱码，
+    // 而症状是「游戏里描述变乱码」，离原因很远。
+    filteringCharset = 'UTF-8'
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+legacyForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+// ---------------------------------------------------------------- 测试
+//
+// 绝大部分桥接逻辑刻意做成不依赖 Minecraft 的纯 Java（住在 core/），
+// 所以 `:core:test` 那 148 个用例在这边也照跑。本工程自己的测试只有两个：
+// 它们守的是这个版本自己的资源与源码（SRG 版访问转换器、日志文案）。
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.14.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // 与 mod/ 一致：Gson 在运行时由游戏自带，测试要单独声明，
+    // 且版本必须和游戏实际用的一致（1.20.1 是 2.10.1）。
+    testImplementation 'com.google.code.gson:gson:2.10.1'
+
+    // ---- 软依赖模组（只编译期）----
+    //
+    // 走 modCompileOnly 而不是 compileOnly：Forge 1.20.1 的已发布模组是 SRG 名，
+    // 插件会把它重映射成官方名之后才喂给编译器（见 LEGACY.md）。
+    //
+    // ⚠️ **必须带 :slim 分类器** —— Create 在 1.20.1 这条线上**不发布无分类器的 jar**，
+    // 只发 -all / -slim / -sources / -javadoc。不带分类器时 Gradle 报的是
+    // 「cannot be resolved」，而 compileClasspath 里它仍然列在那里（没有 jar），
+    // 于是症状变成一大堆「程序包 com.simibubi.create... 不存在」，很容易往错的方向查。
+    // （1.21.1 那条线反过来只有无分类器的 jar，所以 ../mod/build.gradle 里没有这个后缀。）
+    //
+    // 选 slim 而不是 all：slim 是模组自己的类（all 额外捆了 Flywheel 那些），
+    // 我们只用它做类型检查。
+    //
+    // transitive = false：只需要 Create 自己的类。打开传递依赖会把
+    // flywheel / ponder / registrate 全拖进来，对「方法签名对不对」毫无帮助。
+    modCompileOnly("com.simibubi.create:create-1.20.1:${create_version}:slim") {
+        transitive = false
+    }
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat = 'full'
+        showStandardStreams = false
+    }
+
+    // 契约样本目录声明成 test 的产物，理由见 ../mod/build.gradle 里同名的一段
+    //（ContractDumpTest 写在 core 里，写的是仓库根的 shared/fixtures/bridge-dump）。
+    outputs.dir(layout.projectDirectory.dir('../shared/fixtures/bridge-dump'))
+}
+
+// ---------------------------------------------------------------- 发布
+
+// 发布到 KessokuMaven。artifactId 带 -mc1.20.1 后缀：同一个 Maven 坐标只能放一个
+// 制品，而两个 MC 版本是并列的两个产物，不是同一个制品的两种分类器用法。
+//
+// 凭据**只从环境变量读，绝不写进仓库**；判断放在 doFirst 里，
+// 否则没设环境变量时连 build 都跑不起来（日常构建不需要发布凭据）。
+tasks.withType(PublishToMavenRepository).configureEach {
+    doFirst {
+        def missing = []
+        if (!System.getenv('K_MAVEN_USERNAME')) missing << 'K_MAVEN_USERNAME'
+        if (!System.getenv('K_MAVEN_TOKEN')) missing << 'K_MAVEN_TOKEN'
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                    "发布到 KessokuMaven 需要环境变量：" + missing.join('、') + "\n" +
+                    "  PowerShell:  \$env:K_MAVEN_USERNAME='...'; \$env:K_MAVEN_TOKEN='...'\n" +
+                    "  Git Bash:    export K_MAVEN_USERNAME=... K_MAVEN_TOKEN=...")
+        }
+    }
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            // legacyforge 会把 reobf 之后的 jar 换进发布物，不会把未混淆的 dev jar 发出去。
+            from components.java
+            artifactId = "${mod_id}-mc1.20.1"
+
+            pom {
+                name = "${mod_name} (Minecraft 1.20.1)"
+                description = mod_description
+                licenses {
+                    license {
+                        name = mod_license
+                    }
+                }
+                developers {
+                    developer {
+                        name = 'Luzzi（辛六子）'
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = 'KessokuMaven'
+            url = 'https://maven.kessokuteatime.work/releases'
+            credentials {
+                username = System.getenv('K_MAVEN_USERNAME') ?: ''
+                password = System.getenv('K_MAVEN_TOKEN') ?: ''
+            }
+        }
+    }
+}

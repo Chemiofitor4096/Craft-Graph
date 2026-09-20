@@ -26,6 +26,7 @@ import { encode } from "gpt-tokenizer";
 // 解析与渲染住在一起、由 smoke 的往返测试钉住 —— 这里曾因为「只在一侧有实现」而把
 // 机器覆盖度的分子分母取错，断言因此永远为真。
 import { parseFieldCoverage } from "./report.js";
+import { resolveBridgeLocation } from "./config.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -560,6 +561,84 @@ try {
     "工作台合成仍然报「手工」，没被编出一个机器台数",
     !/工作台.*\d+ 台/.test(torchPlan),
     torchPlan.split("\n").find((l) => l.includes("工作台")) ?? torchPlan.slice(0, 300),
+  );
+
+  // ============================================================ 原始协议体检
+  //
+  // 上面走的是 MCP 工具（用户视角），这一段直接读桥接的 HTTP 接口 ——
+  // 有两件事只有看原始数据才发现得了，而它们正是**换一个 MC 版本时最容易悄悄错**的地方：
+  //
+  //   1. 配方 id 是否**非空且唯一**。「这是哪条配方」和下游的缓存都以它为准。
+  //      1.20.1 上 id 来自 RecipeManager 的 map key（那边没有 RecipeHolder），
+  //      这是那条线特有的假设，每次体检都该验一遍。
+  //   2. 标签规模。标签若没绑定，标签还原会**静默退化**成物品列表 ——
+  //      原料表看起来仍然完整，只是丢了「任意一种都行」的语义，而且不报错。
+  //
+  // 顺带把 /health 自报的版本打出来：一眼看出这份报告来自哪个 MC 版本与加载器
+  //（1.21.1 是 neoforge-…，1.20.1 是 forge-…）。
+  const location = resolveBridgeLocation();
+  const baseUrl = `http://${location.host}:${location.port}`;
+  const authHeaders: Record<string, string> = location.token
+    ? { Authorization: `Bearer ${location.token}` }
+    : {};
+
+  const health = (await (await fetch(`${baseUrl}/health`, { headers: authHeaders })).json()) as {
+    ready?: boolean;
+    mcVersion?: string;
+    loader?: string;
+    recipeCount?: number;
+    itemCount?: number;
+  };
+  process.stdout.write(
+    `  ℹ️  桥接自报：${health.mcVersion ?? "?"} / ${health.loader ?? "?"}，` +
+      `${health.recipeCount ?? "?"} 条配方、${health.itemCount ?? "?"} 个物品\n`,
+  );
+  check(
+    "桥接 ready，且自报了 MC 版本与加载器",
+    health.ready === true && !!health.loader && !!health.mcVersion,
+    JSON.stringify(health),
+  );
+
+  // 抽两页快照看 id 的形状就够了（全量覆盖度诊断在 npm run inspect 里做）。
+  const seenIds = new Set<string>();
+  let sampled = 0;
+  let blankIds = 0;
+  for (let page = 0; page < 2; page++) {
+    const cursor = page * 500;
+    const snapshot = (await (
+      await fetch(`${baseUrl}/snapshot?cursor=${cursor}&limit=500`, { headers: authHeaders })
+    ).json()) as { recipes?: { id?: string }[]; nextCursor?: number | null };
+
+    for (const recipe of snapshot.recipes ?? []) {
+      sampled++;
+      if (!recipe.id) blankIds++;
+      else seenIds.add(recipe.id);
+    }
+    if (snapshot.nextCursor === null || snapshot.nextCursor === undefined) break;
+    if (snapshot.nextCursor === cursor) break; // 游标没前进就别再要了
+  }
+  check(
+    `抽到的配方 id 都非空（${sampled} 条里 ${blankIds} 条空）`,
+    sampled > 0 && blankIds === 0,
+    `抽到 ${sampled} 条配方`,
+  );
+  check(
+    `抽到的配方 id 互不重复（去重后 ${seenIds.size}/${sampled}）`,
+    seenIds.size === sampled,
+    "id 撞车会让下游的缓存与「哪条配方」指向错的东西",
+  );
+
+  const tagPage = (await (
+    await fetch(`${baseUrl}/tags/items/all`, { headers: authHeaders })
+  ).json()) as { tags?: Record<string, string[]> };
+  const tagNames = Object.keys(tagPage.tags ?? {});
+  const tagMembers = tagNames.reduce((n, t) => n + (tagPage.tags?.[t]?.length ?? 0), 0);
+  // 下限刻意压得很低：这条断言要抓的是「标签整个没绑定」（那时是 0），
+  // 而不是去规定任何一个整合包该有多少标签。
+  check(
+    `物品标签读到了（${tagNames.length} 个标签 / ${tagMembers} 条成员）`,
+    tagNames.length >= 50 && tagMembers >= 50,
+    "标签为 0 意味着标签还原静默退化成物品列表 —— 原料表看着完整，语义丢了",
   );
 
 } catch (err) {

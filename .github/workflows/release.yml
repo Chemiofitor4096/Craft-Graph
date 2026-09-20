@@ -1,11 +1,15 @@
 name: Release
 
-# 打 tag 即发布：把 Mod jar 附到 GitHub Release 上。
+# 打 tag 即发布：构建两个 MC 版本的 jar（1.21.1 / 1.20.1）附到 GitHub Release 上。
 #
 # 为什么单独一个 workflow 而不是塞进 ci.yml：
 # ci.yml 跑在 push 到 main / PR 上，是「每次改代码都验证」；
 # 这个是「决定对外发布时」才跑，权限要求也不同（需要 contents: write）。
-# 混在一起会让普通的 PR 也带上写权限。
+#
+# 两个版本各一个 job：它们需要**不同的 JDK**（1.21.1 是 21，1.20.1 的 Forge 是 17），
+# 而且是两个独立的 Gradle 构建。发布那个 job 把两边的产物凑齐再建 Release ——
+# 这样「只发了一半」是不可能的（needs 会让缺任何一半时整个 workflow 失败）。
+
 on:
   push:
     tags: ['v*']
@@ -15,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要校验的版本 tag（形如 v0.1.0），用于干跑时比对产物版本'
+        description: '要校验的版本 tag（形如 v0.2.2），用于干跑时比对产物版本'
         required: true
 
 permissions:
@@ -23,8 +27,9 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: 构建并发布 Mod jar
+  # ------------------------------------------------------------ 1.21.1 / NeoForge
+  mod-1.21.1:
+    name: 构建 1.21.1 jar
     runs-on: ubuntu-latest
     # 与 ci.yml 同理：冷缓存下要下载并反编译 Minecraft，给个上限避免挂到 6 小时。
     timeout-minutes: 40
@@ -62,7 +67,10 @@ jobs:
       # 后果是 Release 页面写着 0.1.1，附件却是一个自我标识为 0.1.0 的 jar，
       # 玩家装上去以后游戏里显示的版本对不上，排查起来要绕一大圈。
       # 与其发布之后再发现，不如在这里直接失败。
-      - name: 校验产物版本与 tag 一致
+      #
+      # 两个 jar 共用同一个 mod_version（mod-1.20.1 那边是从这个文件读的），
+      # 所以这一处检查对两个版本同时成立。
+      - name: 校验 tag 与 mod_version 一致
         working-directory: mod
         run: |
           set -euo pipefail
@@ -93,13 +101,109 @@ jobs:
 
           echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / jar 内 metadata 一致"
 
-      - name: 上传构建产物（干跑时可从这里下载检查）
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: craftgraph-mod-jar
+          name: craftgraph-1.21.1-jars
           path: mod/build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
+
+  # ------------------------------------------------------- 1.20.1 / MinecraftForge
+  mod-1.20.1:
+    name: 构建 1.20.1 jar
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1.20.1 的 Forge 跑在 Java 17 上，工具链与编译目标都是 17。
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 检查 gradlew 可执行位
+        run: |
+          if [ ! -x mod-1.20.1/gradlew ]; then
+            echo "::error::mod-1.20.1/gradlew 在 git 里不是可执行文件（应为 100755）。"
+            echo "::error::修复：git update-index --chmod=+x mod-1.20.1/gradlew 然后提交，提交前不要 reset。"
+            exit 1
+          fi
+
+      - name: 构建与测试
+        working-directory: mod-1.20.1
+        run: ./gradlew build --no-daemon --stacktrace
+
+      # 与 1.21.1 那边同理，只是文件名带 classifier、metadata 在 mods.toml（不是 neoforge.mods.toml）。
+      #
+      # 另外这里校验**访问转换器确实在 jar 里**：它对锻造那 27 条配方的作用是静默的
+      # （写错/丢失不是崩溃，而是那批配方变回 opaque），所以在产物上就地断言一句，
+      # 比等玩家在游戏里发现便宜得多。
+      - name: 校验产物（版本、mods.toml、访问转换器）
+        working-directory: mod-1.20.1
+        run: |
+          set -euo pipefail
+          TAG_VER="${RELEASE_TAG#v}"
+          FILE_VER=$(grep -E '^mod_version=' ../mod/gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+
+          if [ "$FILE_VER" != "$TAG_VER" ]; then
+            echo "::error::tag 是 ${RELEASE_TAG}，但 mod_version=${FILE_VER}（两个版本共用它）"
+            exit 1
+          fi
+
+          JAR="build/libs/craftgraph-${FILE_VER}-mc1.20.1.jar"
+          if [ ! -f "$JAR" ]; then
+            echo "::error::没找到 $JAR —— 产物名字与 mod_version 不符？"
+            ls -la build/libs/ build/devlibs/ 2>/dev/null || true
+            exit 1
+          fi
+
+          if ! unzip -p "$JAR" META-INF/mods.toml | grep -q "version = \"${FILE_VER}\""; then
+            echo "::error::$JAR 里的 mods.toml 版本不是 ${FILE_VER}"
+            unzip -p "$JAR" META-INF/mods.toml
+            exit 1
+          fi
+
+          if ! unzip -l "$JAR" | grep -q "META-INF/accesstransformer.cfg"; then
+            echo "::error::$JAR 里没有 META-INF/accesstransformer.cfg —— 锻造配方会静默退化成读不懂"
+            exit 1
+          fi
+
+          echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / mods.toml 与 AT 都在"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: craftgraph-1.20.1-jars
+          path: mod-1.20.1/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14
+
+  # ------------------------------------------------------------------ 建 Release
+  release:
+    name: 建 Release
+    needs: [mod-1.21.1, mod-1.20.1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 取回两个版本的产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: craftgraph-*-jars
+          merge-multiple: true
+          path: dist
+
+      - name: 确认四个附件都在
+        run: ls -la dist/
 
       # 只有真正的 tag 推送才建 Release。手动触发到这一步为止。
       - name: 发布 GitHub Release
@@ -108,21 +212,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          VER="${RELEASE_TAG#v}"
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
 
+          # 两个 MC 版本各一对（jar + sources jar），四个一起挂上去 ——
+          # 「同一个版本的两个变体」这件事在 Release 页面上必须一眼看得见。
+          #
           # --generate-notes 会按 commit 自动归类，比手写更容易保持准确。
-          # 首个发布的版本另外给一段安装说明：Mod 和 MCP Server 是两半，
-          # 只装 jar 是问不出任何东西的，这一点必须在最显眼的位置写清楚。
-          gh release create "$RELEASE_TAG" \
+          gh release create "$TAG" \
             --title "CraftGraph ${VER}" \
             --generate-notes \
-            mod/build/libs/craftgraph-${VER}.jar \
-            mod/build/libs/craftgraph-${VER}-sources.jar
+            dist/craftgraph-${VER}.jar \
+            dist/craftgraph-${VER}-sources.jar \
+            dist/craftgraph-${VER}-mc1.20.1.jar \
+            dist/craftgraph-${VER}-mc1.20.1-sources.jar
 
       - name: 干跑结束提示
         if: github.event_name == 'workflow_dispatch'
         run: |
-          echo "干跑完成：构建与版本校验都通过，产物在 workflow artifacts 里。"
+          echo "干跑完成：两个版本的构建与校验都通过，产物在 workflow artifacts 里。"
           echo "确认无误后打 tag 推送即可真正发布："
           echo "  git tag v$(grep -E '^mod_version=' mod/gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
           echo "  git push origin --tags"

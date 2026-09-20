@@ -110,6 +110,29 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
 
+// 共享核心（不含 Minecraft 的那一半：算法、协议 DTO、HTTP 服务、快照）。
+//
+// 用 srcDir 把这批源码**当成主源码集的一部分**编进来，而不是 `implementation project(':core')`
+// 再把 class 合并进 jar。理由是这样绕着走了 ModDevGradle：
+// 它会自己配置 jar 任务，我加的那句 `jar { from project(':core')... }` 被它静默丢掉了
+//（实测：sources jar 里拿到了核心源码，而 jar 里一个核心 class 都没有 ——
+//  这种「配了但没生效」正是本项目最警惕的形状，所以换成不依赖它配合的写法）。
+//
+// 这样还有一个附带好处：运行时 jar 里 dev.craftgraph.* 是**一个**包，
+// 不会出现跨 jar 拆分包；sources jar 也是自动带上的，不用额外配置。
+//
+// 那 core/ 为什么还留着一个独立工程？为了**用编译器守住「它不含 MC」这件事**：
+// 在 mod 工程里 MC 就在类路径上，`import net.minecraft.*` 会编译过、测试也过，
+// 那份独立的构建会让它立刻编译失败。见 core/build.gradle 顶部。
+sourceSets.main.java.srcDir '../core/src/main/java'
+
+// 把 core 这个子工程的产物收进本构建自己的 build/ 下。
+//
+// 默认它会写 core/build/，而 1.20.1 那个构建 include 的是同一个 projectDir，
+// 于是两个构建共用同一个输出目录 —— 而它们的编译目标不同（这边 release 21、那边 17），
+// 谁最后跑谁赢，并发跑更会互相覆盖。见 ../mod-1.20.1/build.gradle 里同一段。
+project(':core').layout.buildDirectory.set(layout.buildDirectory.dir('core'))
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 21
@@ -117,9 +140,10 @@ tasks.withType(JavaCompile).configureEach {
 
 // ---------------------------------------------------------------- 测试
 //
-// 绝大部分桥接逻辑刻意做成不依赖 Minecraft 的纯 Java（见 snapshot 包），
+// 绝大部分桥接逻辑刻意做成不依赖 Minecraft 的纯 Java（现在住在 core/），
 // 这样倒排索引、查询、HTTP 服务都能用普通 JUnit 测，不需要启动游戏。
-// 只有 extract 包真正需要游戏，那部分只能靠编译 + 进游戏验证。
+// 留在本工程的测试只有两个：它们守的是这个工程自己的资源与源码
+//（访问转换器文件、日志文案），所以跟着版本走。core 的测试在 `:core:test`。
 
 dependencies {
     testImplementation platform('org.junit:junit-bom:5.14.4')
@@ -238,3 +262,4 @@ publishing {
         }
     }
 }
+

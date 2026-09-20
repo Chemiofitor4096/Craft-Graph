@@ -3,11 +3,9 @@ package dev.craftgraph.extract;
 import com.simibubi.create.content.processing.recipe.ProcessingOutput;
 import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
 
-import dev.craftgraph.extract.RecipeTypeAdapter.ChanceResult;
+import dev.craftgraph.api.Models;
 
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
-import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 
 import java.util.ArrayList;
@@ -58,8 +56,13 @@ import java.util.List;
  * <h2>不覆盖范围</h2>
  *
  * {@code sequenced_assembly} 和 {@code mechanical_crafting} **不是** {@code ProcessingRecipe}
- * 的子类，走不到这里。前者嵌套了一整串子配方，后面要单独处理（或者诚实标 opaque）——
- * 按现在的方式读它会「看起来可读」，实际漏掉大部分成本。
+ * 的子类，走不到这里。前者嵌套了一整串子配方，由 {@link SequencedAssemblyAdapter} 处理。
+ *
+ * <h2>1.20.1 上要注意的</h2>
+ *
+ * {@code ProcessingRecipe} 在 1.20.1 上是 {@code ProcessingRecipe<T extends Container>} ——
+ * **只有一个类型参数**（1.21.1 是 {@code <?, ?>}）。所以这个文件在那边要改的除了
+ * 流体的类型，还有 `instanceof` 的写法。Create 6.0.x 两个版本都有，访问器名字相同。
  *
  * <p><b>验证方式</b>：{@code instanceof ProcessingRecipe} 需要真实的 Create 类，
  * 而测试源码集看不到它，所以这一环只能靠装了 Create 的实例验证
@@ -67,7 +70,7 @@ import java.util.List;
  * 本机开发实例没装 Create，所以**这条路径的运行行为尚未被实测过** ——
  * 能验证的是「编译对着 Create 真实 jar 通过」和「没装 Create 时不会崩」。
  */
-final class CreateAdapter implements RecipeTypeAdapter {
+final class CreateAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
     @Override
     public boolean handles(Recipe<?> recipe) {
@@ -77,20 +80,20 @@ final class CreateAdapter implements RecipeTypeAdapter {
     @Override
     public Integer duration(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;
-        int ticks = processing.getProcessingDuration();
-        // 与 CookingAdapter 同一条约定：0 或负数不是「瞬间完成」，是没读到有意义的值。
-        return ticks > 0 ? ticks : null;
+        return TickDuration.ofOrNull(processing.getProcessingDuration());
     }
 
     @Override
-    public List<ItemStack> results(Recipe<?> recipe) {
+    public List<Models.ItemStack> results(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;
 
-        List<ItemStack> guaranteed = new ArrayList<>();
+        List<Models.ItemStack> guaranteed = new ArrayList<>();
         for (ProcessingOutput output : processing.getRollableResults()) {
-            if (ResultChance.classify(output.getChance()) == ResultChance.Kind.GUARANTEED) {
-                guaranteed.add(output.getStack());
-            }
+            if (ResultChance.classify(output.getChance()) != ResultChance.Kind.GUARANTEED) continue;
+            Models.ItemStack stack = ItemIds.stack(output.getStack());
+            // 产出里出现空栈时跳过而不是报一个 minecraft:air 出去：
+            // 编一个物品名顶上去，下游会把它当成真实产出（见 ItemIds 的说明）。
+            if (stack != null) guaranteed.add(stack);
         }
         // 返回列表（哪怕是空的）而不是 null：这里的语义是「产出由我说了算」，
         // 所以绝不能让上层退回 getResultItem() —— 那只会拿到列表里的第一个。
@@ -98,14 +101,14 @@ final class CreateAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<ChanceResult> chanceResults(Recipe<?> recipe) {
+    public List<Models.ChanceOutput> chanceResults(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;
 
-        List<ChanceResult> out = new ArrayList<>();
+        List<Models.ChanceOutput> out = new ArrayList<>();
         for (ProcessingOutput output : processing.getRollableResults()) {
-            if (ResultChance.classify(output.getChance()) == ResultChance.Kind.PROBABILISTIC) {
-                out.add(new ChanceResult(output.getStack(), output.getChance()));
-            }
+            if (ResultChance.classify(output.getChance()) != ResultChance.Kind.PROBABILISTIC) continue;
+            Models.ItemStack stack = ItemIds.stack(output.getStack());
+            if (stack != null) out.add(new Models.ChanceOutput(stack, output.getChance()));
         }
         return out.isEmpty() ? null : out;
     }
@@ -127,21 +130,20 @@ final class CreateAdapter implements RecipeTypeAdapter {
     }
 
     @Override
-    public List<FluidStack> fluidResults(Recipe<?> recipe) {
+    public List<Models.FluidStack> fluidResults(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;
-        List<FluidStack> out = new ArrayList<>();
-        for (FluidStack stack : processing.getFluidResults()) {
-            if (!stack.isEmpty()) out.add(stack);
-        }
+        List<Models.FluidStack> out = ItemIds.fluids(processing.getFluidResults());
         return out.isEmpty() ? null : out;
     }
 
     @Override
-    public List<SizedFluidIngredient> fluidIngredients(Recipe<?> recipe) {
+    public List<RawSlot> fluidIngredients(Recipe<?> recipe) {
         if (!(recipe instanceof ProcessingRecipe<?, ?> processing)) return null;
-        List<SizedFluidIngredient> out = new ArrayList<>();
+        List<RawSlot> out = new ArrayList<>();
         for (SizedFluidIngredient ingredient : processing.getFluidIngredients()) {
-            if (!ingredient.ingredient().hasNoFluids()) out.add(ingredient);
+            if (ingredient.ingredient().hasNoFluids()) continue;
+            RawSlot slot = ItemIds.fluidSlot(ingredient);
+            if (!slot.isEmpty()) out.add(slot);
         }
         return out.isEmpty() ? null : out;
     }

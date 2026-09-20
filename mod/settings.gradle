@@ -9,3 +9,13 @@ plugins {
 }
 
 rootProject.name = 'craftgraph'
+
+// 共享核心：不含 Minecraft 的那一半（见 core/build.gradle 顶部的说明）。
+//
+// 用 projectDir 指到 ../core，而不是把它放到 mod/ 下面 —— 它不属于任何一个 MC 版本，
+// 1.20.1 那条线同样会 include 它，放在仓库根目录才反映这件事。
+//
+// 这样 mod 这边的命令**不用变**：`./gradlew test` 会同时跑 :test 和 :core:test
+//（不带路径的任务名会匹配当前工程及其子工程），`./gradlew build` 同理。
+include 'core'
+project(':core').projectDir = file('../core')

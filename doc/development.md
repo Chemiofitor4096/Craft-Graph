@@ -19,11 +19,21 @@
 | `doc/protocol.md` | **Bridge HTTP API 契约** —— 两侧唯一的约定，改代码前先看这个 |
 | `doc/decisions.md` | 已锁定的技术决策及其代价 |
 | `doc/format-evaluation.md` | 输出格式的实测评估（含对紧凑 DSL 方案的评估） |
+| `doc/porting-1.20.1.md` | 1.20.1 版本的调查结论、已核实的 API 差异与两个版本的差异清单 |
 | `mcp-server/` | TypeScript MCP 服务器：工具定义、配方树、产线计算 |
-| `mod/` | NeoForge 桥接 Mod：读配方、建索引、暴露本地 HTTP |
-| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Mod 测试生成（不提交） |
+| `mod/` | 1.21.1（NeoForge）桥接 Mod：读配方、建索引、暴露本地 HTTP |
+| `mod-1.20.1/` | 1.20.1（MinecraftForge 47.2.0+）版本变体，共享 `core/` |
+| `core/` | **不含 Minecraft** 的那一半：算法、协议 DTO、快照、本地 HTTP 服务 |
+| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Java 测试生成（不提交） |
 
-`mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开，不需要仓库里其他部分。
+`mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开。它把 `../core` 当作子工程 include 进来
+（`settings.gradle`），所以从 `mod/` 执行 `./gradlew build` 会连 `core` 一起构建和测试 ——
+不带路径的任务名会匹配当前工程及其子工程。
+
+`core/` 单独存在的理由只有一条：**用编译器守住「这批代码不含 Minecraft」**。
+它的类路径上没有 MC，所以混进一行 `import net.minecraft.*` 会在 `:core:compileJava` 立刻失败；
+放在 `mod/` 里则会一路编译通过、测试全绿，直到有人想在没有游戏的机器上跑测试才发现。
+`mod/` 用 `srcDir` 把 `core` 的源码编进自己的 jar（运行时是一个包，没有跨 jar 拆分包）。
 
 ## 开发环境
 
@@ -55,11 +65,18 @@ npm run inspect      # 配方覆盖度诊断：哪些配方类型读不懂、为
 npm run routes       # 选路质量诊断：首选路线里的叶子原料、整合度分布（改启发式之前先跑它）
 
 # Bridge Mod（Java）—— 不需要启动 Minecraft
-cd ../mod
-./gradlew test
+cd ../mod              # 1.21.1 / NeoForge
+./gradlew test         # 含 :core:test（子工程的任务名会一起匹配）
 ./gradlew build
-./gradlew runClient   # 启动带 Mod 的游戏
+./gradlew runClient    # 启动带 Mod 的游戏
+
+cd ../mod-1.20.1       # 1.20.1 / MinecraftForge —— 独立的构建，需要 JDK 17
+./gradlew build
 ```
+
+两个 MC 版本共享 `core/`（算法与协议），各自保留一份「读游戏对象」的代码。
+**改了一侧就想想另一侧**：共有判断该往 `core/` 挪，而不是抄一遍。
+两边都必须绿 —— CI 里是两个 job。
 
 四层各自负责不同的东西，**都不能省**：
 
