@@ -119,11 +119,17 @@ if not errorlevel 1 goto :tagexists
 echo       git tag v%VER%                 not present  ok
 
 curl -s -o "%TEMP%\cg-maven.xml" -w "%%{http_code}" "https://maven.kessokuteatime.work/releases/dev/craftgraph/craftgraph/maven-metadata.xml" >"%TEMP%\cg-http.txt" 2>nul
-set /p HTTP=<"%TEMP%\cg-http.txt"
+set /p HTTP=<"%TEMP%\cg-http.txt" "%TEMP%\cg-maven2.xml" "%TEMP%\cg-http2.txt"
 if not "%HTTP%"=="200" goto :mavenunknown
 findstr /c:"<version>%VER%</version>" "%TEMP%\cg-maven.xml" >nul
 if not errorlevel 1 goto :mavenexists
 echo       KessokuMaven %VER%             not present  ok
+curl -s -o "%TEMP%\cg-maven2.xml" -w "%%{http_code}" "https://maven.kessokuteatime.work/releases/dev/craftgraph/craftgraph-mc1.20.1/maven-metadata.xml" >"%TEMP%\cg-http2.txt" 2>nul
+set /p HTTP=<"%TEMP%\cg-http2.txt"
+if not "%HTTP%"=="200" goto :mavenunknown
+findstr /c:"<version>%VER%</version>" "%TEMP%\cg-maven2.xml" >nul
+if not errorlevel 1 goto :mavenexists
+echo       KessokuMaven mc1.20.1 %VER%             not present  ok
 echo.
 goto :creds
 
@@ -256,6 +262,6 @@ set FAILED=1
 
 :end
 echo.
-del "%TEMP%\cg-tags.txt" "%TEMP%\cg-maven.xml" "%TEMP%\cg-http.txt" 2>nul
+del "%TEMP%\cg-tags.txt" "%TEMP%\cg-maven.xml" "%TEMP%\cg-http.txt" "%TEMP%\cg-maven2.xml" "%TEMP%\cg-http2.txt" "%TEMP%\cg-status.txt" 2>nul
 echo ============================================================
 pause
