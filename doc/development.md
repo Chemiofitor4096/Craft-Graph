@@ -19,11 +19,20 @@
 | `doc/protocol.md` | **Bridge HTTP API 契约** —— 两侧唯一的约定，改代码前先看这个 |
 | `doc/decisions.md` | 已锁定的技术决策及其代价 |
 | `doc/format-evaluation.md` | 输出格式的实测评估（含对紧凑 DSL 方案的评估） |
+| `doc/porting-1.20.1.md` | 1.20.1 版本的调查结论与方案（含已核实的 API 差异） |
 | `mcp-server/` | TypeScript MCP 服务器：工具定义、配方树、产线计算 |
 | `mod/` | NeoForge 桥接 Mod：读配方、建索引、暴露本地 HTTP |
-| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Mod 测试生成（不提交） |
+| `core/` | **不含 Minecraft** 的那一半：算法、协议 DTO、快照、本地 HTTP 服务 |
+| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Java 测试生成（不提交） |
 
-`mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开，不需要仓库里其他部分。
+`mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开。它把 `../core` 当作子工程 include 进来
+（`settings.gradle`），所以从 `mod/` 执行 `./gradlew build` 会连 `core` 一起构建和测试 ——
+不带路径的任务名会匹配当前工程及其子工程。
+
+`core/` 单独存在的理由只有一条：**用编译器守住「这批代码不含 Minecraft」**。
+它的类路径上没有 MC，所以混进一行 `import net.minecraft.*` 会在 `:core:compileJava` 立刻失败；
+放在 `mod/` 里则会一路编译通过、测试全绿，直到有人想在没有游戏的机器上跑测试才发现。
+`mod/` 用 `srcDir` 把 `core` 的源码编进自己的 jar（运行时是一个包，没有跨 jar 拆分包）。
 
 ## 开发环境
 

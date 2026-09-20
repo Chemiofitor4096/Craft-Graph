@@ -55,21 +55,43 @@ class LogEncodingTest {
     /** 至少应该找到这么多条日志语句。低于它说明扫描逻辑坏了，而不是「恰好没有中文」。 */
     private static final int MIN_EXPECTED_CALLS = 15;
 
+    /**
+     * 要扫的源码根。
+     *
+     * <p>第二个是**共享核心**（另一个 Gradle 工程）。它现在一条日志都没有，
+     * 但它将来会有 —— 而那时如果这里只扫 mod 自己的源码，新加的中文日志
+     * 会绕过守卫，症状又是「只有我们这几行是乱码」。守卫要覆盖整个 Java 产品，
+     * 而不是碰巧覆盖到的那一半。
+     *
+     * <p>注意守卫留在 mod 工程而不是 core：它守的是「这个产品写日志的方式」，
+     * 而 core 单独看并不知道自己还有个 mod 兄弟。
+     */
+    private static final List<Path> SOURCE_ROOTS = List.of(
+            Path.of("src", "main", "java"),
+            Path.of("..", "core", "src", "main", "java"));
+
     @Test
     @DisplayName("所有日志语句都是 ASCII（含跨行的拼接）")
     void loggerCallsAreAscii() throws IOException {
         List<String> offenders = new ArrayList<>();
         int total = 0;
 
-        try (Stream<Path> files = Files.walk(Path.of("src", "main", "java"))) {
-            for (Path file : files.filter((p) -> p.toString().endsWith(".java")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
-                Matcher m = LOGGER_CALL.matcher(source);
-                while (m.find()) {
-                    total++;
-                    String call = m.group();
-                    if (!StandardCharsets.US_ASCII.newEncoder().canEncode(call)) {
-                        offenders.add(file + "\n    " + call.replace("\n", "\n    "));
+        for (Path root : SOURCE_ROOTS) {
+            // 根不存在必须失败，不能跳过：静默跳过等于「这一半没检查过」，
+            // 而它在报告里看起来和「检查过且干净」一模一样。
+            assertTrue(Files.isDirectory(root),
+                    "源码根不存在，扫描没有覆盖到它：" + root.toAbsolutePath());
+
+            try (Stream<Path> files = Files.walk(root)) {
+                for (Path file : files.filter((p) -> p.toString().endsWith(".java")).toList()) {
+                    String source = Files.readString(file, StandardCharsets.UTF_8);
+                    Matcher m = LOGGER_CALL.matcher(source);
+                    while (m.find()) {
+                        total++;
+                        String call = m.group();
+                        if (!StandardCharsets.US_ASCII.newEncoder().canEncode(call)) {
+                            offenders.add(file + "\n    " + call.replace("\n", "\n    "));
+                        }
                     }
                 }
             }
