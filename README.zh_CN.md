@@ -124,7 +124,7 @@ repositories {
 
 dependencies {
     // 只在编译期用到 DTO 就写 compileOnly；要在运行时也加载这个 Mod，把 jar 放进 mods 目录
-    compileOnly 'dev.craftgraph:craftgraph:0.2.0'
+    compileOnly 'dev.craftgraph:craftgraph:0.2.1'
 }
 ```
 
