@@ -90,4 +90,18 @@ class ModMetadataTest {
         assertTrue(template.contains("modId = \"neoforge\""), "缺 neoforge 依赖声明");
         assertTrue(template.contains("modId = \"minecraft\""), "缺 minecraft 依赖声明");
     }
+
+    @Test
+    @DisplayName("★ pack.mcmeta 在位，且 pack_format 是 1.21.1 的 34")
+    void packMcmetaExistsWithTheRightFormat() throws IOException {
+        // 与 1.20.1 那份同理：缺了它游戏报 Missing metadata in pack mod，而构建侧看不见。
+        Path mcmeta = Path.of("src", "main", "resources", "pack.mcmeta");
+        assertTrue(Files.exists(mcmeta),
+                "缺 src/main/resources/pack.mcmeta —— 游戏会报 Missing metadata in pack mod:craftgraph");
+
+        String json = Files.readString(mcmeta, StandardCharsets.UTF_8);
+        // 34 = 1.21.1 的资源包格式（取自参考工程 ProtectionEngineering，它能正常加载）。
+        assertTrue(json.contains("\"pack_format\": 34"),
+                "pack_format 应当是 34（1.21.1）。15 是 1.20.1 的，抄错时游戏会把这个资源包当成别的版本。 实际内容：" + json);
+    }
 }

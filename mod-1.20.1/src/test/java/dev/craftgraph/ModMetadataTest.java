@@ -121,4 +121,21 @@ class ModMetadataTest {
                             + "中文会变成乱码再原样进游戏。中文请写进模板：\n  " + line);
         }
     }
+
+    @Test
+    @DisplayName("★ pack.mcmeta 在位，且 pack_format 是 1.20.1 的 15")
+    void packMcmetaExistsWithTheRightFormat() throws IOException {
+        // 缺了它游戏会报 "Missing metadata in pack mod:craftgraph"（实测在日志里看到过），
+        // 而编译、测试、CI 的构建都看不见 —— 与 mandatory / loaderVersion 同一类：
+        // 只有把 jar 装进游戏才发现。所以这里直接读文件断言。
+        Path mcmeta = Path.of("src", "main", "resources", "pack.mcmeta");
+        assertTrue(Files.exists(mcmeta),
+                "缺 src/main/resources/pack.mcmeta —— 游戏会报 Missing metadata in pack mod:craftgraph");
+
+        String json = Files.readString(mcmeta, StandardCharsets.UTF_8);
+        // 15 是 1.20.1 的资源包格式（从他们整合包里 40 个能正常工作的 1.20.1 模组读出来的众数），
+        // 34 是 1.21.1 的 —— 两份别抄错。
+        assertTrue(json.contains("\"pack_format\": 15"),
+                "pack_format 应当是 15（1.20.1）。34 是 1.21.1 的，抄错时游戏会把这个资源包当成别的版本。 实际内容：" + json);
+    }
 }

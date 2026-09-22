@@ -51,3 +51,6 @@ desktop.ini
 # 仓库里不需要第二份会过期的副本。
 live-check.bat
 release.bat
+
+# AI 工具自己生成的忽略文件，不属于这个项目（工具会重新生成它）
+.zcodeignore

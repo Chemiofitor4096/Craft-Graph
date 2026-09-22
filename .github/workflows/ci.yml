@@ -73,7 +73,7 @@ jobs:
       # 反向的那一半：1.21.1 用 neoforge.mods.toml，依赖块写 type="required"。
       # 把 1.20.1 那套 mandatory 抄过来同样会让游戏拒收（NeoForge 认的是 type）。
       # 两边都数一遍，是因为这两个文件长得很像、很容易互相抄错。
-      - name: 校验产物元数据形状（neoforge.mods.toml / type）
+      - name: 校验产物元数据形状（neoforge.mods.toml / type / pack.mcmeta）
         working-directory: mod
         run: |
           set -euo pipefail
@@ -89,6 +89,13 @@ jobs:
             cat "$TOML"
             exit 1
           fi
+          # pack.mcmeta 缺了游戏会报 "Missing metadata in pack mod:<modid>"（实测踩过），
+          # 而编译、测试、CI 的构建全都看不见 —— 只有在真游戏日志里才出现。
+          if ! unzip -l "$JAR" | grep -q "pack.mcmeta"; then
+            echo "::error::$JAR 里没有 pack.mcmeta —— 游戏会报 Missing metadata in pack mod"
+            exit 1
+          fi
+
           echo "依赖块形状正确：$BLOCKS 个块，$REQUIRED 处 type=required"
 
       # 契约样本由 ContractDumpTest 生成，而目录本身刻意不提交进仓库（见 .gitignore），
@@ -161,7 +168,7 @@ jobs:
       # type="required" 时，编译、测试、构建全过，而游戏在扫描 mod 文件阶段直接拒收
       #   InvalidModFileException: Missing required field mandatory in dependency
       # 表现成「装了但这个 mod 不存在」—— 实测踩过一次。
-      - name: 校验产物元数据形状（mandatory / neoforge.mods.toml）
+      - name: 校验产物元数据形状（mods.toml / mandatory / pack.mcmeta）
         working-directory: mod-1.20.1
         run: |
           set -euo pipefail
@@ -181,6 +188,13 @@ jobs:
             echo "::error::$JAR 的 mods.toml 里出现了 type= —— 那是 NeoForge 的写法，Forge 会拒收"
             exit 1
           fi
+          # pack.mcmeta 缺了游戏会报 "Missing metadata in pack mod:<modid>"（实测踩过），
+          # 而编译、测试、CI 的构建全都看不见 —— 只有在真游戏日志里才出现。
+          if ! unzip -l "$JAR" | grep -q "pack.mcmeta"; then
+            echo "::error::$JAR 里没有 pack.mcmeta —— 游戏会报 Missing metadata in pack mod"
+            exit 1
+          fi
+
           echo "依赖块形状正确：$BLOCKS 个块，$MANDATORY 处 mandatory"
 
       # 产物自检：Forge 1.20.1 要的是 META-INF/mods.toml（不是 neoforge.mods.toml），

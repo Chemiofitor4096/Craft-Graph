@@ -110,6 +110,13 @@ jobs:
             exit 1
           fi
 
+          # pack.mcmeta 缺了游戏会报 "Missing metadata in pack mod:<modid>"（实测踩过），
+          # 而编译、测试、CI 的构建全都看不见 —— 只有在真游戏日志里才出现。
+          if ! unzip -l "$JAR" | grep -q "pack.mcmeta"; then
+            echo "::error::$JAR 里没有 pack.mcmeta —— 游戏会报 Missing metadata in pack mod"
+            exit 1
+          fi
+
           echo "版本校验通过：${RELEASE_TAG} / mod_version=${FILE_VER} / jar 内 metadata 一致"
 
       - name: 上传构建产物
@@ -208,6 +215,13 @@ jobs:
           fi
           if grep -qE '^[[:space:]]*type[[:space:]]*=' "$TOML"; then
             echo "::error::1.20.1 的 mods.toml 里出现了 type= —— Forge 会拒收"
+            exit 1
+          fi
+
+          # pack.mcmeta 缺了游戏会报 "Missing metadata in pack mod:<modid>"（实测踩过），
+          # 而编译、测试、CI 的构建全都看不见 —— 只有在真游戏日志里才出现。
+          if ! unzip -l "$JAR" | grep -q "pack.mcmeta"; then
+            echo "::error::$JAR 里没有 pack.mcmeta —— 游戏会报 Missing metadata in pack mod"
             exit 1
           fi
 
