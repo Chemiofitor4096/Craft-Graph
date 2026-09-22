@@ -42,11 +42,22 @@ base {
 // 而 tasks.named() 找不到任务时会立刻失败（不是延迟到执行期）。
 java.withSourcesJar()
 
+// 文件名带 MC 后缀，但**不用 classifier** —— classifier 会进 maven 的制品名，
+// 变成 craftgraph-mc1.20.1-0.3.3-mc1.20.1.jar，而不带 classifier 的坐标就取不到 jar（实测 404）。
+// 所以文件名靠 archiveFileName 指定：dev jar 与发布用的 reobf jar 各指定一次
+//（发布出去的是 build/libs 里 reobf 过的那个，所以它的名字才关键）。
 tasks.named('jar', Jar) {
-    archiveClassifier = 'mc1.20.1'
+    archiveFileName = "craftgraph-${version}-mc1.20.1.jar"
+}
+// reobfJar 是 ModDevGradle 稍后才创建的任务，所以用 matching/configureEach 惰性配置
+//（tasks.named 在这个时刻会直接报「Task with name 'reobfJar' not found」）
+tasks.matching { it.name == 'reobfJar' }.configureEach {
+    archiveFileName = "craftgraph-${version}-mc1.20.1.jar"
 }
 tasks.named('sourcesJar', Jar) {
-    archiveClassifier = 'mc1.20.1-sources'
+    // sources 用 maven 的标准 classifier（-sources.jar 是约定），文件名另外指定
+    archiveClassifier = 'sources'
+    archiveFileName = "craftgraph-${version}-mc1.20.1-sources.jar"
 }
 
 // 1.20.1 跑在 **Java 17** 上（不是 21）。共享代码因此也必须能编到 17，
@@ -209,6 +220,7 @@ publishing {
             // legacyforge 会把 reobf 之后的 jar 换进发布物，不会把未混淆的 dev jar 发出去。
             from components.java
             artifactId = "${mod_id}-mc1.20.1"
+
 
             pom {
                 name = "${mod_name} (Minecraft 1.20.1)"
