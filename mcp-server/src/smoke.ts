@@ -304,6 +304,65 @@ try {
     machinePlan.split("\n").slice(0, 14).join(" / "),
   );
 
+  // ---- 缺口必须聚合在开头，且算不出的台数要占一行 ----
+  //
+  // 这次改动的由来：真实会话里模型只能去「逐环节明细」里捡机器台数，凑出一句
+  // 「1 台/环节」当答案（那是下限不是可用数字），并把 5 条缺口散在正文各处。
+  // 所以断言两件事：① 机器表**包含算不出的环节**（写「未知」，而不是整节消失）
+  // ② 缺口块在开头，且明确否掉两种误读。
+  check(
+    "★ 机器表包含「耗时读不到」的环节，台数写明未知（而不是整节消失）",
+    machinePlan.includes("| 环节 | 机器 | 耗时 | 台数 |") &&
+      machinePlan.includes("**未知**") &&
+      !machinePlan.includes("没有可计算机器数的环节"),
+    machinePlan.split("\n").slice(0, 20).join(" / "),
+  );
+  const gapAt = machinePlan.indexOf("## 这份规划缺什么");
+  const tableAt = machinePlan.indexOf("## 需要多少机器");
+  check("★ 缺口聚合在开头（排在机器表之前）", gapAt >= 0 && gapAt < tableAt, `缺口块=${gapAt} 机器表=${tableAt}`);
+  check(
+    "★ 台数未知时明确否掉「不需要机器」「手工合成」两种误读",
+    machinePlan.includes("不是「不需要机器」") && machinePlan.includes("也不是「手工合成」"),
+    machinePlan.split("\n").slice(0, 8).join(" / "),
+  );
+  // 真正「零缺口」的计划要满足：链尾是**用户声明的**基础原料（不是「没有配方」）、
+  // 且每个环节都读得到耗时。夹具里 铁锭←熔炼(200刻)←铁矿石，把铁矿石声明为基础原料即可。
+  const cleanPlan = renderPlan(
+    store,
+    calculatePlan(store, "item", "minecraft:iron_ingot", {
+      ratePerMinute: 60,
+      rawMaterials: ["minecraft:iron_ore"],
+    }),
+    "test",
+    2,
+  );
+  check("没有缺口时如实说「没有已知缺口」（而不是不吭声）", cleanPlan.includes("没有已知缺口"), cleanPlan.slice(0, 200));
+
+  // ---- 副产回代 ----
+  const reusePlan = calculatePlan(store, "item", "minecraft:iron_ingot", { ratePerMinute: 60 });
+  const withReuse = renderPlan(
+    store,
+    {
+      ...reusePlan,
+      byproductReuse: [
+        {
+          item: "minecraft:iron_nugget",
+          kind: "item" as const,
+          ratePerMinute: 30,
+          usedBy: [],
+          alternativeFor: [{ item: "minecraft:iron_ingot", recipeId: "examplepack:made_up" }],
+        },
+      ],
+    },
+    "test",
+    2,
+  );
+  check(
+    "有副产可回代时给提示，且声明数字没有假设它",
+    withReuse.includes("可以回代") && withReuse.includes("假设"),
+    withReuse.split("\n").filter((l) => l.includes("回代")).join(" / "),
+  );
+
   // ---- 读不懂的提示文案 ----
   //
   // 原来写「装 EMI 或加适配层后可以读到」：方案已改成 JEI 优先、而且「适配层」是内部概念。

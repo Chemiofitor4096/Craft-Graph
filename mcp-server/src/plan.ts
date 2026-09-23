@@ -64,6 +64,15 @@ export interface PlanNode {
   children: PlanNode[];
   note?: string;
 
+  /**
+   * `status === "raw"` 时，为什么它是基础原料。
+   *
+   * 两种含义完全不同，必须分开：`no_recipe` 是这个包里**没有**能产出它的配方
+   * （玩家得自己想办法），`user_declared` 是调用方声明「到此为止」。
+   * 靠解析中文 note 来区分太脆弱 —— 与 status 字段同一个理由。
+   */
+  rawReason?: "no_recipe" | "user_declared";
+
   /** 被展示裁剪掉的分支规模。见 tree.ts 的 pruneTree 说明。 */
   subtree?: { nodeCount: number };
 }
@@ -90,12 +99,37 @@ export interface PlanByproduct {
   fromRecipe: string;
 }
 
+/**
+ * 一份副产能不能在规划内部被用掉。
+ *
+ * <h2>它只是提示，不改数字</h2>
+ *
+ * 报告里的原料表**刻意不假设你会把副产用回去** —— 能不能回代取决于产物能不能运回上游、
+ * 你愿不愿意改配方。假设了会让照着表建产线的人拿到一份做不到的账。
+ * 但「这份盐酸正好是透镜那条替代配方的输入」是**事实**，工具手里有全部数据却不说，
+ * 人就只能自己发现（实测：模型靠手工比对才发现上游能砍一半）。
+ * 所以把它算出来告诉人，但明确标注「上面的数字没有假设这个」。
+ */
+export interface ByproductReuse {
+  item: string;
+  kind: StackKind;
+  ratePerMinute: number;
+  /** 规划里已经在吃它的环节 → 这份副产本来就是别处的原料 */
+  usedBy: { item: string; recipeId: string }[];
+  /** 某个环节的**替代配方**会吃它 → 换过去就能把这份副产变成原料 */
+  alternativeFor: { item: string; recipeId: string }[];
+}
+
 export interface ProductionPlan {
   target: { item: string; kind: StackKind; ratePerMinute: number };
   root: PlanNode;
   rawMaterials: PlanRawMaterial[];
   machines: PlanMachine[];
   byproducts: PlanByproduct[];
+  /**
+   * 副产能不能在规划内部被用掉。**只是提示，数字不因它改变**，见 reuseOf 的说明。
+   */
+  byproductReuse: ByproductReuse[];
   /** 每分钟总耗能（FE）。有任一环节读不到能耗时为 null。 */
   totalEnergyPerMinute: number | null;
   warnings: string[];
@@ -143,19 +177,73 @@ class PlanWalker extends ResolutionEngine {
     this.energyTotal = 0;
 
     const root = this.expand(kind, id, this.ratePerMinute, [], 0);
+    const byproducts = [...this.byproductTotals.values()].sort((a, b) => a.item.localeCompare(b.item));
 
     return {
       target: { item: id, kind, ratePerMinute: this.ratePerMinute },
       root,
       rawMaterials: [...this.rawTotals.values()].sort((a, b) => a.item.localeCompare(b.item)),
       machines: [...this.machineTotals.values()].sort((a, b) => a.machine.localeCompare(b.machine)),
-      byproducts: [...this.byproductTotals.values()].sort((a, b) => a.item.localeCompare(b.item)),
+      byproducts,
+      byproductReuse: this.reuseOf(root, byproducts),
       totalEnergyPerMinute: this.energyIncomplete ? null : this.energyTotal,
       warnings: this.warnings,
       truncated: this.truncated,
       manualSteps: this.manualSteps,
       manualCraftingSteps: this.manualCraftingSteps,
     };
+  }
+
+  /**
+   * 副产回代：这份副产能不能被规划里的某个环节吃掉。
+   *
+   * 只用现成的倒排索引（`recipesConsuming` 在建索引时就把标签展开过了），
+   * 所以「某个槽位写的是 #xxx，而这份副产正好是 xxx 的成员」天然命中 ——
+   * 这正是配方语义里最容易被忽略的一种「已经有地方在吃它」。
+   *
+   * 结果只是提示：报告里的数字**没有**假设你把副产用回去（见 ByproductReuse 的说明）。
+   */
+  private reuseOf(root: PlanNode, byproducts: PlanByproduct[]): ByproductReuse[] {
+    if (byproducts.length === 0) return [];
+
+    // 规划里用到的配方 → 哪些物品在用
+    const usedRecipes = new Map<string, string[]>();
+    // 规划里各物品的候选配方 → 哪些物品可以改用它
+    const altRecipes = new Map<string, string[]>();
+    const walk = (node: PlanNode): void => {
+      if (node.recipeId) {
+        const list = usedRecipes.get(node.recipeId);
+        if (list) list.push(node.item);
+        else usedRecipes.set(node.recipeId, [node.item]);
+      }
+      for (const alt of node.alternatives) {
+        const list = altRecipes.get(alt);
+        if (list) list.push(node.item);
+        else altRecipes.set(alt, [node.item]);
+      }
+      node.children.forEach(walk);
+    };
+    walk(root);
+
+    const out: ByproductReuse[] = [];
+    for (const byproduct of byproducts) {
+      const usedBy: ByproductReuse["usedBy"] = [];
+      const alternativeFor: ByproductReuse["alternativeFor"] = [];
+      for (const recipe of this.store.recipesConsuming(byproduct.kind, byproduct.item)) {
+        for (const item of usedRecipes.get(recipe.id) ?? []) usedBy.push({ item, recipeId: recipe.id });
+        for (const item of altRecipes.get(recipe.id) ?? []) alternativeFor.push({ item, recipeId: recipe.id });
+      }
+      if (usedBy.length > 0 || alternativeFor.length > 0) {
+        out.push({
+          item: byproduct.item,
+          kind: byproduct.kind,
+          ratePerMinute: byproduct.ratePerMinute,
+          usedBy,
+          alternativeFor,
+        });
+      }
+    }
+    return out;
   }
 
   private expand(kind: StackKind, id: string, rate: number, path: string[], depth: number): PlanNode {
@@ -165,6 +253,7 @@ class PlanWalker extends ResolutionEngine {
 
     if (this.opts.rawMaterials.includes(id)) {
       node.status = "raw";
+      node.rawReason = "user_declared";
       node.note = "用户指定为基础原料";
       this.addRaw(kind, id, rate);
       return node;
@@ -198,6 +287,7 @@ class PlanWalker extends ResolutionEngine {
     const candidates = this.candidatesFor(kind, id);
     if (candidates.length === 0) {
       node.status = "raw";
+      node.rawReason = "no_recipe";
       node.note = "没有配方能产出它，视为基础原料";
       this.addRaw(kind, id, rate);
       return node;

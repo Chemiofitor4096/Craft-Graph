@@ -8,7 +8,7 @@
  */
 
 import type { RecipeStore, StackKind } from "./cache.js";
-import type { ProductionPlan } from "./plan.js";
+import type { PlanNode, ProductionPlan } from "./plan.js";
 import { flattenTree, type NodeKind, type TreeResult, type TreeNode } from "./tree.js";
 import type { Recipe } from "./types.js";
 
@@ -376,39 +376,143 @@ export function renderTree(store: RecipeStore, result: TreeResult, targetLabel: 
   return lines.join("\n");
 }
 
+interface MachineStep {
+  item: string;
+  machineId: string | null;
+  secondsPerCraft: number | null;
+  machines: number | null;
+}
+
+/**
+ * 所有**需要机器**的环节。原版工作台合成不算机器；被截断/循环/读不懂的节点没有配方，也不算。
+ */
+function collectMachineSteps(root: PlanNode): MachineStep[] {
+  const byItem = new Map<string, MachineStep>();
+  const walk = (node: PlanNode): void => {
+    if (node.status === "craft" && node.recipeType !== "minecraft:crafting" && !byItem.has(node.item)) {
+      byItem.set(node.item, {
+        item: node.item,
+        machineId: node.machineId ?? null,
+        secondsPerCraft: node.secondsPerCraft ?? null,
+        machines: node.machines ?? null,
+      });
+    }
+    node.children.forEach(walk);
+  };
+  walk(root);
+  return [...byItem.values()].sort((a, b) => a.item.localeCompare(b.item));
+}
+
+/**
+ * 把「这份规划缺什么」聚合到一处。
+ *
+ * 这些信息原来散在三处：开头两条 ⚠️/ℹ️、每个节点的 inline note、结尾的「需要注意」列表。
+ * 后果是读的人得自己汇总 —— 实测发生过：模型写了 5 条「必须告诉你的问题」，
+ * 那本该是工具给的一段。所以现在统一在这里，每类附「怎么办」。
+ *
+ * 最后还有一类「其他」：把没能归入上述类别的 warning 原文列出来。
+ * 留着它是因为**缺口宁可多说一句，也不能因为没归类就消失**。
+ */
+export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineSteps: MachineStep[]): string[] {
+  const lines: string[] = [];
+  const cap = 4;
+  const list = (names: string[]): string => {
+    const shown = names.slice(0, cap).map((n) => `\`${n}\``);
+    return names.length > cap ? `${shown.join("、")} 等 ${names.length} 处` : shown.join("、");
+  };
+
+  const noDuration: string[] = [];
+  const noRecipe: PlanNode[] = [];
+  const probabilistic: string[] = [];
+  const incomplete: { item: string; reason: string }[] = [];
+  const walk = (node: PlanNode): void => {
+    if (node.status === "raw" && node.rawReason === "no_recipe") noRecipe.push(node);
+    if (node.probabilistic) probabilistic.push(node.item);
+    if (node.status === "cycle") incomplete.push({ item: node.item, reason: "循环依赖" });
+    else if (node.status === "truncated") incomplete.push({ item: node.item, reason: "超过深度上限" });
+    else if (node.status === "budget") incomplete.push({ item: node.item, reason: "超过节点数上限" });
+    else if (node.status === "opaque") incomplete.push({ item: node.item, reason: "配方读不懂" });
+    node.children.forEach(walk);
+  };
+  walk(plan.root);
+  for (const step of machineSteps) if (step.machines == null) noDuration.push(step.item);
+
+  const mentioned = new Set<string>([
+    ...noDuration,
+    ...noRecipe.map((n) => n.item),
+    ...probabilistic,
+    ...incomplete.map((i) => i.item),
+  ]);
+  const others = [...new Set(plan.warnings)].filter((w) => ![...mentioned].some((id) => w.includes(id)));
+
+  const bullets: string[] = [];
+  if (noDuration.length > 0) {
+    bullets.push(
+      `- **台数算不出**：${list(noDuration)} —— 这些环节是**机器加工**，但**读不到耗时**` +
+        `（模组机器配方常缺 processingTime，游戏会当成瞬间完成），所以给不出台数。` +
+        `**不是「不需要机器」，也不是「手工合成」** —— 只是我们读不到它的速度。`,
+    );
+  }
+  if (noRecipe.length > 0) {
+    const items = noRecipe.map((n) => `${name(store, n.item)} ${round(n.ratePerMinute)}${kindUnit(n.kind)}/分`);
+    bullets.push(
+      `- **原料链到此为止**：${items.slice(0, cap).join("、")}${items.length > cap ? ` 等 ${items.length} 种` : ""} —— ` +
+        `这个包的数据里没有能产出它们的配方，得你自己获得（挖、刷、或别的方式）。` +
+        `如果游戏里其实做得出来，那是我们没读到这条配方：\`npm run inspect\` 会列出读不懂的配方类型。`,
+    );
+  }
+  if (incomplete.length > 0) {
+    const byReason = new Map<string, string[]>();
+    for (const i of incomplete) {
+      const arr = byReason.get(i.reason);
+      if (arr) arr.push(i.item); else byReason.set(i.reason, [i.item]);
+    }
+    const parts = [...byReason].map(([reason, items]) => `${list(items)}（${reason}）`);
+    bullets.push(`- **有环节没展开**：${parts.join("；")} —— **所以上面的原料与副产数字是下限**。`);
+  }
+  if (probabilistic.length > 0) {
+    bullets.push(`- **按期望值估算**：${list(probabilistic)} 是概率产出，产量与台数按期望值算，实际会偏少。`);
+  }
+  // coverageCaveat 是给「独立成段」用的（自带 `> ℹ️` 前缀），嵌进列表项里要剥掉
+  const caveat = coverageCaveat(store).replace(/^>\s*\S+\s*/, "").trim();
+  if (caveat.length > 0) bullets.push(`- **数据底子**：${caveat}`);
+  if (others.length > 0) bullets.push(`- **其他**：${others.join("；")}`);
+
+  lines.push("## 这份规划缺什么（先看这里）");
+  lines.push("");
+  lines.push(...bullets);
+  lines.push("");
+  // 结论只由**真正影响数字**的那类决定：
+  //   有环节没展开 → 原料与副产都是下限，数字不能用；
+  //   只是台数算不出 → 原料表可用；
+  //   链尾停在没有配方的原料（挖矿那种）**不是缺口**，不影响结论 ——
+  //   否则每一份产线都会被我们标成「不要照着建」，那句话就没人信了。
+  if (incomplete.length > 0) {
+    lines.push("> **结论**：结构可以参考，但**原料与副产的数字不要直接照着建产线**（上面第三条）。");
+  } else if (noDuration.length > 0) {
+    lines.push("> **结论**：原料表可用；台数有算不出的（上面第一条），那些环节得靠你按实际布置估。");
+  } else {
+    lines.push("> **结论**：没有已知缺口 —— 每个环节都算出了台数，原料也都查得到来源。");
+  }
+  return lines;
+}
+
 export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel: string, detailDepth = 2): string {
   const lines: string[] = [];
 
   lines.push(`# 产线规划：每分钟 ${plan.target.ratePerMinute}${kindUnit(plan.target.kind)} ${targetLabel}`);
   lines.push("");
 
-  if (plan.truncated) {
-    lines.push("> ⚠️ **这份规划不完整**，有环节没有展开，原料表偏低，不能直接照着建。");
-    lines.push("");
-  }
-  if (plan.manualSteps > 0) {
-    // 不要把两种原因混成一句「通常是工作台合成」：
-    // 模组机器配方读不到耗时是我们的数据缺口，说成「手工合成」会让玩家照着建错线，
-    // 也会让模型以为这台机器不需要配比。见 ProductionPlan.manualCraftingSteps。
-    const machineSteps = plan.manualSteps - plan.manualCraftingSteps;
-    if (plan.manualCraftingSteps > 0 && machineSteps === 0) {
-      lines.push(`> ℹ️ 有 ${plan.manualCraftingSteps} 个工作台合成环节，没有耗时字段（原版设计如此），只能给出合成次数。`);
-    } else if (machineSteps > 0 && plan.manualCraftingSteps === 0) {
-      lines.push(
-        `> ⚠️ 有 ${machineSteps} 个环节是机器加工，但**读不到耗时数据**（这些配方类型没有耗时字段），` +
-          `所以给不出机器台数，只能给出合成次数。`,
-      );
-      lines.push("");
-      lines.push(coverageCaveat(store));
-    } else {
-      lines.push(
-        `> ℹ️ 有 ${plan.manualSteps} 个环节给不出机器数量：` +
-          `${plan.manualCraftingSteps} 个工作台合成（原版没有耗时字段），` +
-          `${machineSteps} 个机器加工但读不到耗时。`,
-      );
-      lines.push("");
-      lines.push(coverageCaveat(store));
-    }
+  // 缺口聚合到一处，见 renderGaps 的说明。原来这些信息散在头部、inline note 和结尾列表三处。
+  const machineSteps = collectMachineSteps(plan.root);
+  lines.push(...renderGaps(store, plan, machineSteps));
+
+  if (plan.manualCraftingSteps > 0) {
+    // 工作台合成不算「缺口」（原版设计如此），但也得说一句，否则读的人会以为漏算了机器。
+    lines.push(
+      `> ℹ️ 另有 ${plan.manualCraftingSteps} 个工作台合成环节：原版设计如此（**没有耗时字段**），` +
+        `只能给出合成次数，报「手工」是对的。`,
+    );
     lines.push("");
   }
 
@@ -418,18 +522,37 @@ export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel
     lines.push("");
   }
 
-  // ---- 机器清单 ----
+  // ---- 机器清单（含算不出的环节）----
+  //
+  // 这一节原来只列**算得出**的机器，于是「耗时读不到」时整节变成
+  // `_（没有可计算机器数的环节）_` —— 读的人（和模型）只能去逐环节明细里捡数字。
+  // 实测就发生过：模型从明细里凑出一句「1 台/环节」当机器数，而那是下限不是可用数字。
+  // 所以现在**每个需要机器的环节都占一行**，算不出的明确写「未知」并说明原因。
   lines.push("## 需要多少机器");
   lines.push("");
-  if (plan.machines.length === 0) {
-    lines.push("_（没有可计算机器数的环节）_");
+  if (machineSteps.length === 0) {
+    lines.push("_（这份规划里没有需要机器的环节，全是工作台合成）_");
   } else {
-    lines.push("| 机器 | 数量 | 用于 |");
-    lines.push("|---|---|---|");
-    for (const m of plan.machines) {
-      lines.push(`| ${name(store, m.machine)} | ${m.count} | ${m.recipeIds.map((r) => `\`${r}\``).join(", ")} |`);
+    lines.push("| 环节 | 机器 | 耗时 | 台数 |");
+    lines.push("|---|---|---|---|");
+    for (const s of machineSteps) {
+      const machine = s.machineId ? name(store, s.machineId) : "读不到机器名";
+      const seconds = s.secondsPerCraft == null ? "未知" : `${round(s.secondsPerCraft)} 秒`;
+      const count = s.machines == null ? "**未知**" : `${s.machines}`;
+      lines.push(`| ${name(store, s.item)} | ${machine} | ${seconds} | ${count} |`);
     }
     lines.push("");
+    const unknownMachine = machineSteps.filter((s) => s.machines == null).length;
+    const unnamed = machineSteps.filter((s) => s.machineId == null).length;
+    if (unknownMachine > 0) {
+      lines.push(
+        `_台数「未知」${unknownMachine} 处：这些环节耗时读不到（模组机器配方常缺 processingTime，` +
+          `游戏会当成瞬间完成），所以算不出台数 —— **不是「不需要机器」**。_`,
+      );
+    }
+    if (unnamed > 0) {
+      lines.push("_「读不到机器名」：这些模组配方没有声明自己的机器（Create 就没有），不是没在用机器。_");
+    }
     lines.push("_机器数按「满载运行」估算，未考虑上下游没对齐导致的空转。_");
   }
 
@@ -462,7 +585,26 @@ export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel
       );
     }
     lines.push("");
-    lines.push("_副产只做统计，没有回代抵扣上游消耗。_");
+    if (plan.byproductReuse.length > 0) {
+      lines.push("**其中可以回代的**（下面是提示 —— 上面的原料表**没有**假设你这么做）：");
+      lines.push("");
+      for (const reuse of plan.byproductReuse) {
+        const where: string[] = [];
+        for (const use of reuse.usedBy) where.push(`规划里的 ${name(store, use.item)} 已经在用它`);
+        for (const alt of reuse.alternativeFor) {
+          where.push(`把 ${name(store, alt.item)} 改用 \`${alt.recipeId}\` 就能吃下它`);
+        }
+        lines.push(
+          `- ${name(store, reuse.item)} ${round(reuse.ratePerMinute)}${kindUnit(reuse.kind)}/分 —— ${where.join("；")}。`,
+        );
+      }
+      lines.push("");
+      lines.push(
+        "_要不要回代由你定：能不能用取决于上游能不能把副产运回去、你愿不愿意改配方，所以数字里没有替你假设。_",
+      );
+    } else {
+      lines.push("_副产只做统计，没有回代抵扣上游消耗。_");
+    }
   }
 
   // ---- 能耗 ----
@@ -481,12 +623,9 @@ export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel
   lines.push("");
   renderPlanNode(store, plan.root, 0, lines);
 
-  if (plan.warnings.length > 0) {
-    lines.push("");
-    lines.push("## 需要注意");
-    lines.push("");
-    for (const w of [...new Set(plan.warnings)]) lines.push(`- ${w}`);
-  }
+  // 原来这里还有一节「需要注意」（plan.warnings 原文列表）。
+  // 那些内容已经按类别聚合进开头的「这份规划缺什么」，未归类的也会落在那里的「其他」一条 ——
+  // 所以这里不再重复一遍（重复的后果是读的人要对两处，还得猜哪个更权威）。
 
   return lines.join("\n");
 }
@@ -524,7 +663,15 @@ function renderPlanNode(store: RecipeStore, node: ProductionPlan["root"], depth:
 
   if (node.recipeId) {
     const craftRate = node.craftsPerMinute !== undefined ? round(node.craftsPerMinute) : "?";
-    const machineText = node.machines != null ? `${node.machines} 台` : "手工";
+    // ⚠️ 这里原来一律写「手工」，于是同一份报告里会出现自相矛盾的两句话：
+    // 机器表写「未知」，明细写「手工」—— 而「填充机」不是工作台。
+    // 与 ProductionPlan.manualCraftingSteps 同一课：把我们的缺口说成「原版就这样」是最误导的一种错。
+    const machineText =
+      node.machines != null
+        ? `${node.machines} 台`
+        : node.recipeType === "minecraft:crafting"
+          ? "手工"
+          : "台数未知（读不到耗时）";
     line += `\n${indent}  ↳ \`${node.recipeId}\`：${craftRate} 次/分 → ${machineText}`;
     if (node.secondsPerCraft != null) line += `，单次 ${round(node.secondsPerCraft)} 秒`;
   }
