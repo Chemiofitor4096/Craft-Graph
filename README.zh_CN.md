@@ -121,6 +121,21 @@ MCP Server 自己去那里找。原版启动器和第三方启动器的位置都
 启动 Minecraft、进入存档，然后问 AI 客户端一个问题。如果它说连不上游戏，
 `get_bridge_status` 会准确告诉你哪里不对。
 
+## 给 AI 客户端装这个 skill（可选，但推荐）
+
+`skill/craftgraph/SKILL.md` 是给 AI 客户端用的 skill：它把这套工具期望的工作流写清楚了 ——
+**先确认产量再规划**、怎么读「深度 / opaque / 截断」、缺口怎么如实转达，
+以及最容易出错的那条：**不要手工重算工具已经算过的东西**。
+
+安装就是把目录复制进客户端的 skills 目录：
+
+```bash
+cp -r skill/craftgraph ~/.claude/skills/     # Claude Code
+cp -r skill/craftgraph ~/.zcode/skills/      # ZCode
+```
+
+不装也能用，但模型倾向于自己重算一遍速率，并把「这份规划算不出什么」散落在正文各处。
+
 ## 作为依赖使用
 
 Mod 也发布到了 **KessokuMaven**，可以不从源码构建，直接依赖它。主要用途是：你想自己写一个

@@ -124,6 +124,23 @@ location are written, so custom game directories work too.
 Start Minecraft, load a world, and ask your AI client something. If it says it cannot reach
 the game, `get_bridge_status` will tell you exactly what is wrong.
 
+## Teach your AI client how to use it (optional, recommended)
+
+`skill/craftgraph/SKILL.md` is a skill for AI clients: it teaches the workflow this tool
+assumes — confirm the target rate *before* planning, how to read depth / `opaque` / truncation,
+how to relay gaps honestly, and (the part that actually goes wrong) not to hand-recompute what
+the tool already computed.
+
+Install it by copying the directory into your client's skills folder:
+
+```bash
+cp -r skill/craftgraph ~/.claude/skills/     # Claude Code
+cp -r skill/craftgraph ~/.zcode/skills/      # ZCode
+```
+
+Without it the model still works, but it tends to re-derive rates by hand and to scatter the
+"here is what this plan cannot tell you" notes through the answer.
+
 ## Use it as a dependency
 
 The mod is also published to **KessokuMaven**, so you can depend on it instead of building it
