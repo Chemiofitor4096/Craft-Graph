@@ -422,12 +422,20 @@ export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineStep
   };
 
   const noDuration: string[] = [];
+  // 工作台合成（原版没有耗时字段）**不是缺口**，但它的 warning 原文（"耗时未知，无法计算机器数"）
+  // 如果不做处理就会掉进下面的「其他」里 —— 于是同一份报告的结论说「没有已知缺口」，
+  // 缺口块里却列着两条「无法计算机器数」。实测就是这个形状（gadget 那种以工作台为根的规划）。
+  // 这类环节由 renderPlan 里那句 ℹ️ 统一说明，所以这里把它们的 warning 摘掉。
+  const manualCrafting: string[] = [];
   const noRecipe: PlanNode[] = [];
   const probabilistic: string[] = [];
   const incomplete: { item: string; reason: string }[] = [];
   const walk = (node: PlanNode): void => {
     if (node.status === "raw" && node.rawReason === "no_recipe") noRecipe.push(node);
     if (node.probabilistic) probabilistic.push(node.item);
+    if (node.status === "craft" && node.recipeType === "minecraft:crafting" && node.machines == null) {
+      manualCrafting.push(node.item);
+    }
     if (node.status === "cycle") incomplete.push({ item: node.item, reason: "循环依赖" });
     else if (node.status === "truncated") incomplete.push({ item: node.item, reason: "超过深度上限" });
     else if (node.status === "budget") incomplete.push({ item: node.item, reason: "超过节点数上限" });
@@ -442,6 +450,7 @@ export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineStep
     ...noRecipe.map((n) => n.item),
     ...probabilistic,
     ...incomplete.map((i) => i.item),
+    ...manualCrafting,
   ]);
   const others = [...new Set(plan.warnings)].filter((w) => ![...mentioned].some((id) => w.includes(id)));
 
@@ -491,6 +500,12 @@ export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineStep
     lines.push("> **结论**：结构可以参考，但**原料与副产的数字不要直接照着建产线**（上面第三条）。");
   } else if (noDuration.length > 0) {
     lines.push("> **结论**：原料表可用；台数有算不出的（上面第一条），那些环节得靠你按实际布置估。");
+  } else if (manualCrafting.length > 0) {
+    // 不能说「每个环节都算出了台数」—— 工作台那几条只有合成次数，读者一眼就能看出矛盾。
+    lines.push(
+      "> **结论**：原料表可用；机器台数都算出来了。工作台合成的环节只有合成次数" +
+        "（原版没有耗时字段，谈不上台数，见下面那行 ℹ️）。",
+    );
   } else {
     lines.push("> **结论**：没有已知缺口 —— 每个环节都算出了台数，原料也都查得到来源。");
   }
@@ -621,6 +636,11 @@ export function renderPlan(store: RecipeStore, plan: ProductionPlan, targetLabel
   lines.push("");
   lines.push("## 逐环节明细");
   lines.push("");
+  // 规则说明只在真有候选对比可看时才印 —— 没有候选的包上它是纯开销。
+  if (hasCandidateDetails(plan.root)) {
+    lines.push(ROUTE_RULE);
+    lines.push("");
+  }
   renderPlanNode(store, plan.root, 0, lines);
 
   // 原来这里还有一节「需要注意」（plan.warnings 原文列表）。
@@ -655,6 +675,38 @@ function planLegend(root: ProductionPlan["root"]): string | null {
   return parts.length > 0 ? `> 图例：${parts.join("｜")}` : null;
 }
 
+/**
+ * 选路规则说明。
+ *
+ * <h2>为什么宁可变长也要写</h2>
+ *
+ * 实测：模型的输出里出现了「为什么不用那条 `_origin`」这类疑问，而它无从回答 ——
+ * 工具只给了「另有 N 条候选」，没说选的时候比的是什么，于是它要么编一个理由，
+ * 要么干脆不提还有别的路线。把判据写出来，配上每个环节的「输入 N 种」和候选的同一个数字，
+ * 这个选择就变成可以复核的事实，而不是工具的独断。
+ *
+ * <p>规则本身没有秘密（见 resolution.ts 的 scoreRecipe）：不构成循环 → 输入种数少 →
+ * 单次产出多。这里只是把它译成人话，顺带解释「为什么 3×3 的合成不算复杂」。
+ */
+const ROUTE_RULE =
+  "> **选路规则**：每个物品在「不构成循环」的候选里，取**合并后输入种数最少**的一条，" +
+  "并列时取单次产出多的。输入按**合并后**算 —— 3×3 有序合成摆 8 个材料、其实只有 2 种，" +
+  "算 2 而不是 8。所以「输入 N 种」越小的候选越可能被换用：**不比它差的候选会列出数字**，" +
+  "明显更差的只报数量。想换路线用 `recipeChoice` 指定，要看全部候选用 `find_alternative_recipes`。";
+
+/** 落选原因的说法。与 plan.ts 的 PlanAlternative.skipReason 一一对应。 */
+const SKIP_REASON: Record<"cycle" | "probabilistic" | "user_choice", string> = {
+  cycle: "会构成循环依赖，已避开",
+  probabilistic: "它只把目标物品算作概率产出，产量算不准",
+  user_choice: "你在 recipeChoice 里指定了这条",
+};
+
+/** 树上有没有出现候选对比 —— 决定要不要印选路规则那行。 */
+function hasCandidateDetails(root: ProductionPlan["root"]): boolean {
+  if ((root.alternativesDetail?.length ?? 0) > 0) return true;
+  return root.children.some(hasCandidateDetails);
+}
+
 function renderPlanNode(store: RecipeStore, node: ProductionPlan["root"], depth: number, lines: string[]): void {
   const indent = "  ".repeat(depth);
   const tagNote = node.chosenFromTag ? ` 【#${node.chosenFromTag}】` : "";
@@ -674,8 +726,40 @@ function renderPlanNode(store: RecipeStore, node: ProductionPlan["root"], depth:
           : "台数未知（读不到耗时）";
     line += `\n${indent}  ↳ \`${node.recipeId}\`：${craftRate} 次/分 → ${machineText}`;
     if (node.secondsPerCraft != null) line += `，单次 ${round(node.secondsPerCraft)} 秒`;
+    // 「输入 N 种」只在下面真列了候选时才印 —— 它是拿来做对照的，没有对照对象时
+    // 只是一句占位（量过：全印上要多花约 2% 的报告长度，而这些位置的数字没人会看）。
+    if (node.inputSlots != null && (node.alternativesDetail?.length ?? 0) > 0) {
+      line += `（输入 ${node.inputSlots} 种）`;
+    }
   }
   lines.push(line);
+
+  // 落选候选：有可能被换用的列决定性事实（输入种数、每次产出），其余只报数量。
+  // 「只列有可能本该选它的」这个取舍是量出来的，见 plan.ts 的 PlanNode.alternativesDetail。
+  if (node.alternativesDetail && node.alternativesDetail.length > 0) {
+    const chosenNoDuration = node.secondsPerCraft == null;
+    const parts = node.alternativesDetail.map((a) => {
+      const slots = a.inputSlots == null ? "读不懂输入" : `输入 ${a.inputSlots} 种`;
+      const per = a.perCraft == null ? "产出读不懂" : `每次产 ${round(a.perCraft)}`;
+      let note = "";
+      if (a.skipReason != null) note = ` —— 按规则它更优，但${SKIP_REASON[a.skipReason]}`;
+      else if (chosenNoDuration && a.secondsPerCraft != null) {
+        // 选中那条读不到耗时，而这条读得到：那它不只是「换条路线」，
+        // 而是这个环节唯一能算出台数的路。实测痛点就在这。见 PlanAlternative.secondsPerCraft
+        note = ` —— 单次 ${round(a.secondsPerCraft)} 秒，**换它才算得出这个环节的台数**`;
+      } else if (a.secondsPerCraft != null) note = `，单次 ${round(a.secondsPerCraft)} 秒`;
+      return `\`${a.recipeId}\`（${a.type}，${slots}/${per}${note}）`;
+    });
+    const omitted = node.alternatives.length - node.alternativesDetail.length;
+    // 用「另有」而不是「不比它差的有」：候选里可能有读不懂输入的，那种没法比较，
+    // 说成「都不比它差」是在替一条没读懂的配方下结论。
+    const head = omitted > 0 ? `另有 ${node.alternatives.length} 条候选，值得看的 ${node.alternativesDetail.length} 条：` : `另有 ${node.alternatives.length} 条候选：`;
+    lines.push(`${indent}  _${head}${parts.join("、")}_`);
+  } else if (node.alternatives.length > 0) {
+    // 只报数量，不做任何比较结论 —— 候选里可能有读不懂输入的，那种没法比较，
+    // 说成「都不比它省」就是在替一条没读懂的配方下结论。
+    lines.push(`${indent}  _另有 ${node.alternatives.length} 条候选配方_`);
+  }
 
   // 与配方树同理：说明已进图例，节点上不重复；标签 id 也不重复（物品行上已有）
   if (node.note && !NOTE_COVERED_BY_LEGEND.has(node.status)) lines.push(`${indent}  _${node.note}_`);

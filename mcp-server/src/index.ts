@@ -35,7 +35,10 @@ const INSTRUCTIONS = `CraftGraph 让 AI 查询正在运行的 Minecraft 的配�
 1. 用户用模糊说法（"铁锭"、"钢"）时，先调 search_items 拿到准确的物品 id。
 2. 问"X 怎么做"→ build_recipe_tree；问"X 有什么用"→ get_recipes_for_input；
    问"每分钟 X 个 Y 怎么建产线"→ calculate_production_plan。
-3. 任何工具报"连不上游戏"时，调 get_bridge_status 确认状态，然后把情况告诉用户，
+3. **用户没说产量时，先问他要每分钟多少**，别自己定一个数。ratePerMinute 会一路乘进
+   原料表和机器台数，而结果里看不出它是猜的 —— 实测模型随手写"8/分"，用户只能自己去发现。
+   对方不方便回答时才代定一个，并**明说这个产量是你假设的**，请他确认。
+4. 任何工具报"连不上游戏"时，调 get_bridge_status 确认状态，然后把情况告诉用户，
    不要自己猜测配方内容。
 
 几个必须如实转达给用户的点：

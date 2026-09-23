@@ -20,10 +20,34 @@
 import { type RecipeStore, type StackKind } from "./cache.js";
 import { ResolutionEngine, normalizeOptions, type ExpansionOptions } from "./resolution.js";
 import type { NodeKind } from "./tree.js";
+import type { Recipe } from "./types.js";
 
 /** 一秒 20 游戏刻。 */
 const TICKS_PER_SECOND = 20;
 const TICKS_PER_MINUTE = TICKS_PER_SECOND * 60;
+
+/**
+ * 每个环节最多列出几条候选配方的事实。
+ *
+ * 上限的理由是 token：整合包里一个物品常有十几条候选（原版就有熔炼/高炉/合成），
+ * 全列出来会占掉报告的大头，而读的人真正想知道的是「有没有比它更省的那条」。
+ * 3 条按输入种数排序取前几，通常就覆盖了所有「更省」的可能。
+ */
+const MAX_DETAILED_ALTERNATIVES = 3;
+
+/**
+ * 这条候选在**选路规则的排序**下是否胜过选中配方。
+ *
+ * 刻意只比规则本身的两个判据（输入种数 → 每次产出），**不含任何罚分** ——
+ * 它要回答的问题正是「为什么不是这条更优的」，所以必须站在没有罚分的角度比。
+ * 与 resolution.ts 的 scoreRecipe 共用同一组判据方向，改那边这里要跟着改。
+ */
+function beatsByRule(alt: { inputSlots: number | null; perCraft: number | null }, chosenSlots: number | null, chosenPerCraft: number): boolean {
+  const av = alt.inputSlots ?? Number.POSITIVE_INFINITY;
+  const cv = chosenSlots ?? Number.POSITIVE_INFINITY;
+  if (av !== cv) return av < cv;
+  return (alt.perCraft ?? 0) > chosenPerCraft;
+}
 
 export interface PlanOptions extends ExpansionOptions {
   /** 目标产量，每分钟多少个（流体是 mB） */
@@ -58,6 +82,29 @@ export interface PlanNode {
   /** 一次配方耗时（秒） */
   secondsPerCraft?: number | null;
 
+  /**
+   * 选中配方的**合并后输入种数**（同一种输入算一个，见 mergeInputs）。
+   *
+   * 它和 {@link alternativesDetail} 里的同一个数字摆在一起，就是「为什么这条」的答案：
+   * 选路规则是「不构成循环的候选里取输入种数最少的」。光报候选数量对模型没用 ——
+   * 实测它只能自己编一句理由，或者干脆不提还有别的路线。
+   */
+  inputSlots?: number;
+  /**
+   * 其余候选里**有可能本该选它**的那几条，按输入种数从少到多取前几条。
+   *
+   * <h2>为什么只留「有可能本该选它」的</h2>
+   *
+   * 先量过再定的：一份 404 节点的规划里有 79 个节点带候选，全列数字要 8.5k 字符
+   * （占整份报告 21%），而其中**只有 26 个**节点的候选不比选中配方更差 ——
+   * 剩下 53 个的候选全都能用规则直接排掉（输入种数更多）。花 6k 字符去报
+   * 「有几条明显更差的路线」，读的人不会因此改变任何决定。
+   *
+   * <p>所以：有可能被换用的列数字，其余只报数量（见 renderPlanNode）。
+   * 真要完整清单，`find_alternative_recipes` 一次调用就有。
+   */
+  alternativesDetail?: PlanAlternative[];
+
   chosenFromTag?: string;
   tagAlternatives?: string[];
   alternatives: string[];
@@ -81,6 +128,44 @@ export interface PlanRawMaterial {
   item: string;
   kind: StackKind;
   ratePerMinute: number;
+}
+
+/**
+ * 一条**没被选中**的候选配方，以及它输在哪。
+ *
+ * 字段刻意只有「决定性事实」两三个：选路用的就是这两个数字（外加「会不会成环」），
+ * 所以把选中配方和候选配方的同一组数字并排给出，读的人就能自己复核这个选择，
+ * 而不必信一句「工具选过了」。
+ */
+export interface PlanAlternative {
+  recipeId: string;
+  /** 给人看的类型名 */
+  type: string;
+  /** 合并后的输入种数。null = 这条配方读不懂输入（opaque） */
+  inputSlots: number | null;
+  /** 每次产出。null = 读不懂产出，**不编一个数** */
+  perCraft: number | null;
+  /**
+   * 一次配方耗时（秒）。null = 这条读不到 —— 与选中配方的同一个字段对照着看。
+   *
+   * 它是「选中那条读不到耗时、而这条读得到」的凭据：那种情况下候选不只是换条路线，
+   * 而是**唯一能算出台数的路**。实测痛点就在这：整合包里模型只能报「台数未知」，
+   * 而同一个物品的另一条配方明明带着 processingTime。
+   */
+  secondsPerCraft?: number | null;
+  /**
+   * 按选路规则**本该选它**、却没选的原因。
+   *
+   * <h2>为什么必须有这个字段</h2>
+   *
+   * 光把候选的数字摆出来还不够：有时候选在规则下**明显更优**（输入更少、或并列时产出更多），
+   * 报告却选了另一条 —— 读的人只会觉得工具选错了。实测就是这个形状：
+   * 「1 铁块 → 9 铁锭」输入 1 种、每次产 9，规则下完胜，但它会成环（铁块要 9 个铁锭），
+   * 于是被重罚。不写这一句，模型只能自己编理由，或者反过来质疑数字。
+   *
+   * 三种原因与 scoreRecipe 里的三类罚分一一对应，不额外发明第四种。
+   */
+  skipReason?: "cycle" | "probabilistic" | "user_choice";
 }
 
 export interface PlanMachine {
@@ -314,6 +399,18 @@ class PlanWalker extends ResolutionEngine {
     if (yieldInfo.probabilistic) node.probabilistic = true;
     node.machineId = recipe.machine ?? null;
     node.alternatives = candidates.filter((r) => r.id !== recipe.id).map((r) => r.id);
+    const chosenSlots = this.mergedSlotCount(recipe);
+    node.inputSlots = chosenSlots ?? undefined;
+    node.alternativesDetail = this.describeAlternatives(
+      kind,
+      id,
+      candidates,
+      recipe,
+      chosenSlots,
+      yieldInfo.perCraft,
+      recipe.duration != null && recipe.duration > 0 ? recipe.duration / TICKS_PER_SECOND : null,
+      path,
+    );
 
     if (yieldInfo.probabilistic) {
       node.note = `概率产出，按期望产量 ${yieldInfo.perCraft}/次 估算`;
@@ -417,6 +514,80 @@ class PlanWalker extends ResolutionEngine {
       if (c.stack.item === targetItem && targetKind === "item") continue;
       this.addByproduct("item", c.stack.item, c.stack.count * c.chance * craftsPerMinute, true, recipe.id);
     }
+  }
+
+  /**
+   * 合并后的输入种数 —— 选路用的就是它。
+   *
+   * 与 scoreRecipe 里同一个口径（都走 mergeInputs），**不能各量各的**：
+   * 两处用不同的尺子量同一件事，正是这类启发式出怪结果的原因。
+   */
+  private mergedSlotCount(recipe: Recipe): number | null {
+    // opaque = 输入读不懂，不能报 0（那会被读成「不需要材料」）
+    if (recipe.opaque) return null;
+    return this.mergeInputs(recipe.inputs).merged.length;
+  }
+
+  /**
+   * 落选候选里、有可能被换用的那几条，按输入种数从少到多取前几条。
+   *
+   * 排序是刻意的：读的人关心的是「有没有更省的路线」，所以把最省的排前面；
+   * 而且一旦最省的那条排在了选中配方前面，就说明这次不是按默认规则选的
+   * （成环 / 概率产出 / 用户指定）—— 那就必须写明原因，见 PlanAlternative.skipReason。
+   *
+   * @param chosenSlots 选中配方的输入种数，null 表示它读不懂输入
+   * @param chosenDuration 选中配方的单次耗时（秒），null 表示读不到
+   */
+  private describeAlternatives(
+    kind: StackKind,
+    id: string,
+    candidates: Recipe[],
+    chosen: Recipe,
+    chosenSlots: number | null,
+    chosenPerCraft: number,
+    chosenDuration: number | null,
+    path: string[],
+  ): PlanAlternative[] | undefined {
+    const others = candidates.filter((r) => r.id !== chosen.id);
+    if (others.length === 0) return undefined;
+
+    const described: PlanAlternative[] = others.map((r) => ({
+      recipeId: r.id,
+      type: r.typeLabel ?? r.type,
+      inputSlots: this.mergedSlotCount(r),
+      // 读不懂产出时给 null，不要 computeYield 那个兜底的 1 —— 那是编的
+      perCraft: r.opaque ? null : this.computeYield(kind, id, r).perCraft,
+      secondsPerCraft: r.duration != null && r.duration > 0 ? r.duration / TICKS_PER_SECOND : null,
+    }));
+
+    described.sort((a, b) => {
+      const av = a.inputSlots ?? Number.POSITIVE_INFINITY;
+      const bv = b.inputSlots ?? Number.POSITIVE_INFINITY;
+      if (av !== bv) return av - bv;
+      return (b.perCraft ?? 0) - (a.perCraft ?? 0) || a.recipeId.localeCompare(b.recipeId);
+    });
+
+    // 两种候选值得列数字：
+    //   ① 不比选中的差（规则有可能本该选它）—— 读不懂输入的进不来，没得比谈不上更优
+    //   ② 选中那条读不到耗时、而它读得到 —— 那种情况下它是唯一能算出台数的路
+    // 其余（明显更差）只报数量，见 PlanNode.alternativesDetail 的量测说明。
+    const competitive = described.filter(
+      (a) =>
+        (a.inputSlots != null && chosenSlots != null && a.inputSlots <= chosenSlots) ||
+        (chosenDuration == null && a.secondsPerCraft != null),
+    );
+    if (competitive.length === 0) return undefined;
+
+    const shown = competitive.slice(0, MAX_DETAILED_ALTERNATIVES);
+    for (const alt of shown) {
+      if (!beatsByRule(alt, chosenSlots, chosenPerCraft)) continue;
+      const recipe = others.find((r) => r.id === alt.recipeId)!;
+      // 顺序与 scoreRecipe 的罚分优先级一致：用户指定 → 成环 → 概率产出
+      if (this.opts.recipeChoice[id] === chosen.id) alt.skipReason = "user_choice";
+      else if (this.wouldCycle(recipe, path, id)) alt.skipReason = "cycle";
+      else if (this.guaranteedYield(id, recipe) <= 0) alt.skipReason = "probabilistic";
+    }
+    return shown;
   }
 
   private addRaw(kind: StackKind, id: string, rate: number): void {

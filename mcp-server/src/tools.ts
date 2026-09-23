@@ -489,12 +489,15 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
       description:
         "给定目标产量（每分钟多少个），算出需要哪些机器各多少台、每分钟消耗多少原料、产出多少副产、总耗能。" +
         "用户问「我要每分钟 X 个 Y，怎么建产线」时用。" +
-        "注意这是贪心近似：每种物品固定选一条配方，副产只统计不回代。结果里会说明所有近似之处。" +
+        "注意这是贪心近似：每种物品固定选一条配方（报告里会说明选路判据和落选候选），副产只统计不回代。" +
         "\n\n顶部那几张汇总表（机器/原料/副产/能耗）才是重点，逐环节明细默认只展示前 3 层。",
       inputSchema: {
         item: z.string().describe("目标物品 id"),
         kind: STACK_KIND,
-        ratePerMinute: z.number().positive().describe("目标产量，每分钟多少个（流体是 mB）"),
+        ratePerMinute: z
+          .number()
+          .positive()
+          .describe("目标产量，每分钟多少个（流体是 mB）。用户没说就先问他，别自己定一个数"),
         format: z
           .enum(["markdown", "json", "tsv"])
           .default("markdown")

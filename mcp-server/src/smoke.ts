@@ -338,6 +338,97 @@ try {
   );
   check("没有缺口时如实说「没有已知缺口」（而不是不吭声）", cleanPlan.includes("没有已知缺口"), cleanPlan.slice(0, 200));
 
+  // ---- 选路说明：为什么是这条 ----
+  //
+  // 这次改动的由来：真实会话里模型写出了「为什么不用那条 `_origin`」这类疑问 ——
+  // 它无从回答。工具当时只报「另有 N 条候选」，没说选的时候比的是什么，
+  // 于是它要么编一个理由，要么干脆不提还有别的路线。
+  // 断言三件事：判据写在报告里、选中与候选的同一个数字并排、按规则更优却没选时给出原因。
+  const routePlanObj = calculatePlan(store, "item", "minecraft:iron_ingot", { ratePerMinute: 60 });
+  const routePlan = renderPlan(store, routePlanObj, "test", 2);
+  const flatPlan = (n: typeof routePlanObj.root): (typeof routePlanObj.root)[] => [n, ...n.children.flatMap(flatPlan)];
+
+  check(
+    "★ 逐环节明细里印出选路判据（模型不必自己编理由）",
+    routePlan.includes("选路规则") && routePlan.includes("合并后输入种数最少"),
+    routePlan.split("\n").find((l) => l.includes("选路规则")) ?? "（没有这一行）",
+  );
+  check(
+    "★ 选中配方那行带上判据本身（输入 N 种）",
+    routePlan.includes("（输入 1 种）"),
+    routePlan.split("\n").find((l) => l.includes("↳")) ?? "（没有 ↳ 行）",
+  );
+  check(
+    "★ 候选行给出同一个判据的数字，可与选中直接对照",
+    routePlan.includes("`minecraft:iron_ingot_from_blasting_iron_ore`（Blasting，输入 1 种/每次产 1，单次 5 秒）"),
+    routePlan.split("\n").find((l) => l.includes("另有")) ?? "（没有候选行）",
+  );
+  // 夹具里 `minecraft:iron_ingot_from_iron_block` 输入 1 种、每次产 9 —— 规则下完胜，
+  // 但它会成环（铁块要 9 个铁锭），于是被罚分避开。不写明原因，读的人只会以为工具选错了。
+  check(
+    "★ 按规则更优却没选时说明原因（铁块那条 1 种/产 9，但会成环）",
+    /iron_ingot_from_iron_block.*按规则它更优，但会构成循环依赖/.test(routePlan),
+    routePlan.split("\n").find((l) => l.includes("iron_block")) ?? "（没有这一行）",
+  );
+  const crushingOnly = flatPlan(routePlanObj.root).find((n) => n.item === "create:crushed_raw_iron");
+  check(
+    "只有一条候选时不编造候选段，输入种数照样给",
+    crushingOnly !== undefined && crushingOnly.inputSlots === 1 && crushingOnly.alternativesDetail === undefined,
+    `inputSlots=${crushingOnly?.inputSlots} alternativesDetail=${JSON.stringify(crushingOnly?.alternativesDetail)}`,
+  );
+  check(
+    "JSON 消费者也能拿到判据（不是只写在 markdown 里）",
+    (routePlanObj.root.alternativesDetail?.length ?? 0) > 0 &&
+      routePlanObj.root.alternativesDetail![0]!.inputSlots === 1 &&
+      routePlanObj.root.alternativesDetail![0]!.perCraft === 9,
+    JSON.stringify(routePlanObj.root.alternativesDetail),
+  );
+  // ---- 工作台环节不该同时出现在「不是缺口」和缺口列表两处 ----
+  //
+  // 实测的形状：结论写「没有已知缺口 —— 每个环节都算出了台数」，而同一个块里
+  // 「其他」列着两条「用 minecraft:crafting 制作，但耗时未知，无法计算机器数」；
+  // 机器表里也确实没有这两行。工作台没有耗时字段是原版设计，由 ℹ️ 那句统一说明即可。
+  const gadgetPlan = renderPlan(
+    store,
+    calculatePlan(store, "item", "examplepack:gadget", { ratePerMinute: 10 }),
+    "test",
+    3,
+  );
+  const gadgetGaps = gadgetPlan.slice(0, gadgetPlan.indexOf("## 需要多少机器"));
+  check(
+    "★ 工作台合成的 warning 不再掉进「其他」（那会让缺口块自相矛盾）",
+    !gadgetGaps.includes("无法计算机器数"),
+    gadgetGaps.split("\n").filter((l) => l.includes("其他")).join(" / ") || "（没有「其他」这条）",
+  );
+  check(
+    "★ 有工作台环节时结论不谎称「每个环节都算出了台数」",
+    !gadgetGaps.includes("每个环节都算出了台数") && gadgetGaps.includes("工作台合成"),
+    gadgetGaps.split("\n").find((l) => l.includes("结论")) ?? "（没有结论行）",
+  );
+  // 选中那条读不到耗时、而候选读得到：那它不只是「换条路线」，而是这个环节**唯一算得出台数**的路。
+  // 实测痛点就在这：整合包里只能报「台数未知」，而同一个物品的另一条配方明明带着 processingTime。
+  // 夹具里 gadget 走工作台（没有耗时），而 gadget_machined 那条有 100 刻。
+  const gadgetMachined = gadgetPlan.split("\n").find((l) => l.includes("gadget_machined"));
+  check(
+    "★ 选中配方读不到耗时时，指出哪条候选算得出台数",
+    gadgetMachined !== undefined && gadgetMachined.includes("换它才算得出这个环节的台数"),
+    gadgetMachined ?? "（没有这一行）",
+  );
+  // 候选只报数量、不做比较：opaque 节点的候选读不懂输入，没得比。
+  // 说成「都不比它省」就是在替一条没读懂的配方下结论 —— 那正是本项目反复栽的那个坑。
+  const opaquePlan = renderPlan(
+    store,
+    calculatePlan(store, "item", "somemod:tungsten_steel_ingot", { ratePerMinute: 1 }),
+    "test",
+    2,
+  );
+  const opaqueAltLine = opaquePlan.split("\n").find((l) => l.includes("条候选"));
+  check(
+    "候选读不懂时只报数量，不替它下「不比它省」的结论",
+    opaqueAltLine !== undefined && opaqueAltLine.includes("另有 1 条候选配方") && !opaqueAltLine.includes("不比"),
+    opaqueAltLine ?? "（没有这一行）",
+  );
+
   // ---- 副产回代 ----
   const reusePlan = calculatePlan(store, "item", "minecraft:iron_ingot", { ratePerMinute: 60 });
   const withReuse = renderPlan(
