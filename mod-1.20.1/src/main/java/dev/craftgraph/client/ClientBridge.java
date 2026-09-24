@@ -25,6 +25,7 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RecipesUpdatedEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.versions.forge.ForgeVersion;
 import org.slf4j.Logger;
 
@@ -111,7 +112,7 @@ public final class ClientBridge {
     public static ClientBridge start(BridgeConfig config) {
         ClientBridge bridge = new ClientBridge(config);
         try {
-            bridge.discovery = DiscoveryFile.publish("127.0.0.1", config.port());
+            bridge.discovery = DiscoveryFile.publish(FMLPaths.GAMEDIR.get(), "127.0.0.1", config.port());
             bridge.server = new BridgeHttpServer(config, bridge.service, bridge.discovery.token());
             bridge.server.start();
 

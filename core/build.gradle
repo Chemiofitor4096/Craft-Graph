@@ -50,6 +50,15 @@ dependencies {
     compileOnly 'com.google.code.gson:gson:2.10.1'
     testImplementation 'com.google.code.gson:gson:2.10.1'
 
+    // slf4j 与 Gson 同理，运行时由游戏自带（Minecraft 的日志后端是 log4j，slf4j 是门面），
+    // 只用于编译。AdapterRegistry / DiscoveryFile 的降级与清理告警从这里出去。
+    // 这里只用 info/warn/debug + {} 占位符这些 2.0.x 全系一致的 API，
+    // 没有 Gson 那种「测试行为依赖游戏自带版本」的耦合，版本不必严格对齐。
+    compileOnly 'org.slf4j:slf4j-api:2.0.13'
+    testImplementation 'org.slf4j:slf4j-api:2.0.13'
+    // 给 core 自己的测试一个输出后端，否则 slf4j 静默退化为 NOP，告警一个都看不见
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.13'
+
     testImplementation platform('org.junit:junit-bom:5.14.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
