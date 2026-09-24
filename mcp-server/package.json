@@ -20,7 +20,8 @@
     "contract": "tsx src/contract.ts",
     "live": "tsx src/live.ts",
     "inspect": "tsx src/inspect.ts",
-    "routes": "tsx src/routes.ts"
+    "routes": "tsx src/routes.ts",
+    "plan": "tsx src/plan-cli.ts"
   },
   "engines": {
     "node": ">=20"

@@ -27,6 +27,7 @@ const { pickCanonical } = await import("./resolution.js");
 const { calculatePlan, prunePlan } = await import("./plan.js");
 const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv, computeFieldCoverage, renderFieldCoverage, parseFieldCoverage } =
   await import("./report.js");
+const { renderPlanHtml, renderTreeHtml, writeExplorerFile } = await import("./explorer.js");
 const { opaqueHint } = await import("./opaque.js");
 
 const PORT = 25599;
@@ -646,6 +647,57 @@ try {
     "工作台合成不谎报机器数",
     torchPlan.root.machines === null && torchPlan.manualSteps > 0,
     `machines=${torchPlan.root.machines} manualSteps=${torchPlan.manualSteps}`,
+  );
+
+  // ============================================================ HTML 探索器
+  //
+  // 网页是给人看的渲染出口。要守的是三件事：
+  //   自包含（一个外部引用都不能有 —— 用户可能离线打开）；
+  //   关键件都在（搜索框、折叠树、明暗切换、结论与明细区）；
+  //   文件落盘位置跟着缓存目录走（测试设了临时目录，所以不会碰用户目录）。
+
+  const htmlPlan = calculatePlan(store, "item", "minecraft:iron_ingot", { ratePerMinute: 10 });
+  const planHtml = renderPlanHtml(store, htmlPlan, "铁锭");
+  const planExternal = planHtml.match(/https?:\/\/\S+/)?.[0];
+  check(
+    "HTML：产线网页自包含（无任何外部引用）",
+    !planExternal,
+    planExternal ? `发现外部引用：${planExternal}` : "",
+  );
+  check(
+    "HTML：产线网页关键件齐全（搜索/折叠/明暗/结论/明细/缺口/机器表）",
+    planHtml.includes('id="q"') &&
+      planHtml.includes("<details") &&
+      planHtml.includes("data-theme") &&
+      planHtml.includes("结论") &&
+      planHtml.includes("逐环节明细") &&
+      planHtml.includes("需要多少机器") &&
+      planHtml.includes("每分钟原料需求"),
+    "缺了某个关键区段",
+  );
+  check(
+    "HTML：动态内容已转义（标题里的尖括号不会变成标签）",
+    renderPlanHtml(store, htmlPlan, "<script>alert(1)</script>").includes("&lt;script&gt;"),
+    "目标标签没有被转义",
+  );
+
+  const htmlTree = buildRecipeTree(store, "item", "minecraft:iron_pickaxe", 1);
+  const treeHtml = renderTreeHtml(store, htmlTree, "1 × 铁镐");
+  const treeExternal = treeHtml.match(/https?:\/\/\S+/)?.[0];
+  check(
+    "HTML：配方树网页自包含且带原料合计",
+    !treeExternal && treeHtml.includes("基础原料合计") && treeHtml.includes("data-theme"),
+    treeExternal ?? "缺关键区段",
+  );
+
+  const written = writeExplorerFile(`plan-minecraft__iron_ingot-10`, planHtml);
+  const expectedDir = path.join(TMP_CACHE, "explorer");
+  check(
+    "HTML：文件写进缓存目录的 explorer/ 子目录",
+    fs.existsSync(written) &&
+      written.startsWith(expectedDir) &&
+      fs.readFileSync(written, "utf-8").startsWith("<!doctype html>"),
+    written,
   );
 
   // ============================================================ 离线降级

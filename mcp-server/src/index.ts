@@ -14,13 +14,7 @@ import { BridgeClient } from "./bridge.js";
 import { resolveBridgeLocation } from "./config.js";
 import { StoreManager } from "./manager.js";
 import { registerTools } from "./tools.js";
-
-/**
- * Server 版本。与 Mod 的 `mod_version`（mod/gradle.properties）保持一致 ——
- * 两者是同一个产品的两半，版本号分开走只会让人对着两个数字猜「哪个是新的」。
- * npm 发布是独立的事，但版本号同步没有问题。
- */
-const VERSION = "0.3.4";
+import { VERSION } from "./version.js";
 
 /**
  * 这段会作为 server instructions 发给 AI 客户端。
@@ -35,6 +29,8 @@ const INSTRUCTIONS = `CraftGraph 让 AI 查询正在运行的 Minecraft 的配�
 1. 用户用模糊说法（"铁锭"、"钢"）时，先调 search_items 拿到准确的物品 id。
 2. 问"X 怎么做"→ build_recipe_tree；问"X 有什么用"→ get_recipes_for_input；
    问"每分钟 X 个 Y 怎么建产线"→ calculate_production_plan。
+   用户想要一份自己能翻看的完整文件时，这两个工具传 format:"html" ——
+   会生成一个自包含网页并只返回文件路径，把路径转告用户即可，不要去解析网页内容。
 3. **用户没说产量时，先问他要每分钟多少**，别自己定一个数。ratePerMinute 会一路乘进
    原料表和机器台数，而结果里看不出它是猜的 —— 实测模型随手写"8/分"，用户只能自己去发现。
    对方不方便回答时才代定一个，并**明说这个产量是你假设的**，请他确认。

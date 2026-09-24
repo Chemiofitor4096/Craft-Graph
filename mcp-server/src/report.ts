@@ -386,7 +386,7 @@ interface MachineStep {
 /**
  * 所有**需要机器**的环节。原版工作台合成不算机器；被截断/循环/读不懂的节点没有配方，也不算。
  */
-function collectMachineSteps(root: PlanNode): MachineStep[] {
+export function collectMachineSteps(root: PlanNode): MachineStep[] {
   const byItem = new Map<string, MachineStep>();
   const walk = (node: PlanNode): void => {
     if (node.status === "craft" && node.recipeType !== "minecraft:crafting" && !byItem.has(node.item)) {
@@ -413,19 +413,42 @@ function collectMachineSteps(root: PlanNode): MachineStep[] {
  * 最后还有一类「其他」：把没能归入上述类别的 warning 原文列出来。
  * 留着它是因为**缺口宁可多说一句，也不能因为没归类就消失**。
  */
-export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineSteps: MachineStep[]): string[] {
-  const lines: string[] = [];
-  const cap = 4;
-  const list = (names: string[]): string => {
-    const shown = names.slice(0, cap).map((n) => `\`${n}\``);
-    return names.length > cap ? `${shown.join("、")} 等 ${names.length} 处` : shown.join("、");
-  };
+/**
+ * 「这份规划缺什么」的**分类结果** —— 只有结构，没有格式。
+ *
+ * 为什么要把分类抽出来：markdown（renderGaps）和 HTML（explorer.ts）都要呈现同一份判断。
+ * 判定逻辑（哪类算缺口、结论由哪类决定）只能有一份实现 —— 两边各写一遍，
+ * 迟早各说各话，而读的人没法发现两个出口的说法不一致。
+ */
+export interface GapClassification {
+  /** 需要机器但耗时读不到的环节物品 —— 台数算不出 */
+  noDuration: string[];
+  /** 链尾停在没有配方的原料（挖矿那种）—— 这不是缺口，但要列出 */
+  noRecipe: PlanNode[];
+  /** 原版工作台合成环节 —— 原版没有耗时字段，不算缺口，但需要单独说明 */
+  manualCrafting: string[];
+  /** 概率产出环节的物品 */
+  probabilistic: string[];
+  /** 没展开的环节（循环/截断/读不懂）—— 存在即「原料是下限」 */
+  incomplete: { item: string; reason: string }[];
+  /** 没归入上述类别的 warning 原文 —— 缺口宁可多说，不能因为没归类就消失 */
+  others: string[];
+  /** 字段覆盖度的一句话说明（可能为空） */
+  dataCaveat: string;
+  /**
+   * 结论级别，只由**真正影响数字**的那类决定：
+   * 有环节没展开 → 数字不可用；只是台数算不出 → 原料可用；
+   * 链尾停在挖矿那种原料**不是**缺口 —— 否则每份产线都会被标成「不要照着建」。
+   */
+  verdict: "incomplete" | "no_duration" | "manual_ok" | "clean";
+}
 
+export function classifyGaps(store: RecipeStore, plan: ProductionPlan, machineSteps: MachineStep[]): GapClassification {
   const noDuration: string[] = [];
   // 工作台合成（原版没有耗时字段）**不是缺口**，但它的 warning 原文（"耗时未知，无法计算机器数"）
   // 如果不做处理就会掉进下面的「其他」里 —— 于是同一份报告的结论说「没有已知缺口」，
   // 缺口块里却列着两条「无法计算机器数」。实测就是这个形状（gadget 那种以工作台为根的规划）。
-  // 这类环节由 renderPlan 里那句 ℹ️ 统一说明，所以这里把它们的 warning 摘掉。
+  // 这类环节由各渲染层的 ℹ️ 统一说明，所以这里把它们的 warning 摘掉。
   const manualCrafting: string[] = [];
   const noRecipe: PlanNode[] = [];
   const probabilistic: string[] = [];
@@ -454,60 +477,87 @@ export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineStep
   ]);
   const others = [...new Set(plan.warnings)].filter((w) => ![...mentioned].some((id) => w.includes(id)));
 
+  return {
+    noDuration,
+    noRecipe,
+    manualCrafting,
+    probabilistic,
+    incomplete,
+    others,
+    // coverageCaveat 是给「独立成段」用的（自带 `> ℹ️` 前缀），分类里只留正文
+    dataCaveat: coverageCaveat(store).replace(/^>\s*\S+\s*/, "").trim(),
+    verdict:
+      incomplete.length > 0
+        ? "incomplete"
+        : noDuration.length > 0
+          ? "no_duration"
+          : manualCrafting.length > 0
+            ? "manual_ok"
+            : "clean",
+  };
+}
+
+export function renderGaps(store: RecipeStore, plan: ProductionPlan, machineSteps: MachineStep[]): string[] {
+  const g = classifyGaps(store, plan, machineSteps);
+  const lines: string[] = [];
+  const cap = 4;
+  const list = (names: string[]): string => {
+    const shown = names.slice(0, cap).map((n) => `\`${n}\``);
+    return names.length > cap ? `${shown.join("、")} 等 ${names.length} 处` : shown.join("、");
+  };
+
   const bullets: string[] = [];
-  if (noDuration.length > 0) {
+  if (g.noDuration.length > 0) {
     bullets.push(
-      `- **台数算不出**：${list(noDuration)} —— 这些环节是**机器加工**，但**读不到耗时**` +
+      `- **台数算不出**：${list(g.noDuration)} —— 这些环节是**机器加工**，但**读不到耗时**` +
         `（模组机器配方常缺 processingTime，游戏会当成瞬间完成），所以给不出台数。` +
         `**不是「不需要机器」，也不是「手工合成」** —— 只是我们读不到它的速度。`,
     );
   }
-  if (noRecipe.length > 0) {
-    const items = noRecipe.map((n) => `${name(store, n.item)} ${round(n.ratePerMinute)}${kindUnit(n.kind)}/分`);
+  if (g.noRecipe.length > 0) {
+    const items = g.noRecipe.map((n) => `${name(store, n.item)} ${round(n.ratePerMinute)}${kindUnit(n.kind)}/分`);
     bullets.push(
       `- **原料链到此为止**：${items.slice(0, cap).join("、")}${items.length > cap ? ` 等 ${items.length} 种` : ""} —— ` +
         `这个包的数据里没有能产出它们的配方，得你自己获得（挖、刷、或别的方式）。` +
         `如果游戏里其实做得出来，那是我们没读到这条配方：\`npm run inspect\` 会列出读不懂的配方类型。`,
     );
   }
-  if (incomplete.length > 0) {
+  if (g.incomplete.length > 0) {
     const byReason = new Map<string, string[]>();
-    for (const i of incomplete) {
+    for (const i of g.incomplete) {
       const arr = byReason.get(i.reason);
       if (arr) arr.push(i.item); else byReason.set(i.reason, [i.item]);
     }
     const parts = [...byReason].map(([reason, items]) => `${list(items)}（${reason}）`);
     bullets.push(`- **有环节没展开**：${parts.join("；")} —— **所以上面的原料与副产数字是下限**。`);
   }
-  if (probabilistic.length > 0) {
-    bullets.push(`- **按期望值估算**：${list(probabilistic)} 是概率产出，产量与台数按期望值算，实际会偏少。`);
+  if (g.probabilistic.length > 0) {
+    bullets.push(`- **按期望值估算**：${list(g.probabilistic)} 是概率产出，产量与台数按期望值算，实际会偏少。`);
   }
-  // coverageCaveat 是给「独立成段」用的（自带 `> ℹ️` 前缀），嵌进列表项里要剥掉
-  const caveat = coverageCaveat(store).replace(/^>\s*\S+\s*/, "").trim();
-  if (caveat.length > 0) bullets.push(`- **数据底子**：${caveat}`);
-  if (others.length > 0) bullets.push(`- **其他**：${others.join("；")}`);
+  if (g.dataCaveat.length > 0) bullets.push(`- **数据底子**：${g.dataCaveat}`);
+  if (g.others.length > 0) bullets.push(`- **其他**：${g.others.join("；")}`);
 
   lines.push("## 这份规划缺什么（先看这里）");
   lines.push("");
   lines.push(...bullets);
   lines.push("");
-  // 结论只由**真正影响数字**的那类决定：
-  //   有环节没展开 → 原料与副产都是下限，数字不能用；
-  //   只是台数算不出 → 原料表可用；
-  //   链尾停在没有配方的原料（挖矿那种）**不是缺口**，不影响结论 ——
-  //   否则每一份产线都会被我们标成「不要照着建」，那句话就没人信了。
-  if (incomplete.length > 0) {
-    lines.push("> **结论**：结构可以参考，但**原料与副产的数字不要直接照着建产线**（上面第三条）。");
-  } else if (noDuration.length > 0) {
-    lines.push("> **结论**：原料表可用；台数有算不出的（上面第一条），那些环节得靠你按实际布置估。");
-  } else if (manualCrafting.length > 0) {
-    // 不能说「每个环节都算出了台数」—— 工作台那几条只有合成次数，读者一眼就能看出矛盾。
-    lines.push(
-      "> **结论**：原料表可用；机器台数都算出来了。工作台合成的环节只有合成次数" +
-        "（原版没有耗时字段，谈不上台数，见下面那行 ℹ️）。",
-    );
-  } else {
-    lines.push("> **结论**：没有已知缺口 —— 每个环节都算出了台数，原料也都查得到来源。");
+  // 结论措辞与 verdict 枚举一一对应，判定在 classifyGaps 里（那份只有一个）
+  switch (g.verdict) {
+    case "incomplete":
+      lines.push("> **结论**：结构可以参考，但**原料与副产的数字不要直接照着建产线**（上面第三条）。");
+      break;
+    case "no_duration":
+      lines.push("> **结论**：原料表可用；台数有算不出的（上面第一条），那些环节得靠你按实际布置估。");
+      break;
+    case "manual_ok":
+      lines.push(
+        "> **结论**：原料表可用；机器台数都算出来了。工作台合成的环节只有合成次数" +
+          "（原版没有耗时字段，谈不上台数，见下面那行 ℹ️）。",
+      );
+      break;
+    case "clean":
+      lines.push("> **结论**：没有已知缺口 —— 每个环节都算出了台数，原料也都查得到来源。");
+      break;
   }
   return lines;
 }

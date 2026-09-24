@@ -53,6 +53,7 @@ AI 查的是你**当前实际加载的整合包**的实时配方数据。
 | **查询** | `search_items`、`get_registry`、`list_recipe_types`、`expand_tag` |
 | **配方检索** | `get_recipes_for_output`、`get_recipes_for_input`、`get_recipe_details`、`find_alternative_recipes` |
 | **规划** | `build_recipe_tree`（递归配方链）、`calculate_production_plan`（机器数、原料速率、副产、能耗） |
+| **给人看的输出** | 两个规划工具传 `format:"html"` 生成自包含交互网页（完整明细、可搜索、明暗切换，离线可开）；或 `npm run plan -- --item <id> --rate <每分钟>` 命令行直算（游戏没开也能用磁盘快照） |
 | **诊断** | `get_bridge_status`、`refresh_recipes` |
 
 以下几件事是刻意处理的，因为它们是「天真实现会给出错误答案」的地方：

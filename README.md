@@ -55,6 +55,7 @@ right now, including recipes that only exist at runtime.
 | **Search** | `search_items`, `get_registry`, `list_recipe_types`, `expand_tag` |
 | **Query recipes** | `get_recipes_for_output`, `get_recipes_for_input`, `get_recipe_details`, `find_alternative_recipes` |
 | **Plan** | `build_recipe_tree` (recursive chain), `calculate_production_plan` (machines, raw material rates, byproducts, energy) |
+| **Human-facing output** | Pass `format:"html"` to either planning tool for a self-contained interactive page (full detail, searchable, dark/light, opens offline); or use `npm run plan -- --item <id> --rate <per-minute>` to plan from the command line (falls back to the disk snapshot when the game is closed) |
 | **Diagnose** | `get_bridge_status`, `refresh_recipes` |
 
 Handled deliberately, because they are where naive tools produce wrong answers:

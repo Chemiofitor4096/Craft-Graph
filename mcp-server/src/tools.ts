@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { RecipeStore, StackKind } from "./cache.js";
+import { renderPlanHtml, renderTreeHtml, writeExplorerFile } from "./explorer.js";
 import { describeStatus, StoreManager } from "./manager.js";
 import { opaqueHint } from "./opaque.js";
 import { calculatePlan, prunePlan } from "./plan.js";
@@ -443,11 +444,13 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
         kind: STACK_KIND,
         count: z.number().positive().default(1).describe("要制作多少个"),
         format: z
-          .enum(["markdown", "json", "tsv"])
+          .enum(["markdown", "json", "tsv", "html"])
           .default("markdown")
           .describe(
             "markdown 默认，可读性最好；tsv 是列式输出，实测在深链上比 markdown 省约 28% token，" +
-              "适合结果很大的情况；json 是完整结构化数据但最贵（约 markdown 的 1.7 倍），只在需要程序化处理时用。",
+              "适合结果很大的情况；json 是完整结构化数据但最贵（约 markdown 的 1.7 倍），只在需要程序化处理时用；" +
+              "html 生成一个自包含的可交互网页（完整结构、可搜索）写到磁盘并只返回文件路径，" +
+              "用户想自己翻看/分享结果时用。",
           ),
         detailDepth: z
           .number()
@@ -476,6 +479,16 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
         const pruned = { ...full, root: pruneTree(full.root, detailDepth) };
         const label = `${count} × ${itemLabel(s, item)}`;
 
+        // html 用的是**未裁剪**的 full —— 网页就是给用户翻全量结构用的
+        if (format === "html") {
+          const p = writeExplorerFile(`tree-${item}-${count}`, renderTreeHtml(s, full, label));
+          return ok(
+            `📄 配方树网页已生成：${p}\n` +
+              `概要：${label} —— ${full.rawMaterials.length} 种基础原料、${full.recipesUsed.length} 条配方、` +
+              `${full.nodeCount} 个节点${full.truncated ? "（树被截断，原料是下限）" : ""}。\n` +
+              `把路径告诉用户即可（网页可折叠展开、搜索、明暗切换）。要继续回答细节问题，用默认格式重新调用。`,
+          );
+        }
         if (format === "json") return ok(json(pruned));
         if (format === "tsv") return ok(renderTreeTsv(s, pruned, label, detailDepth));
         return ok(renderTree(s, pruned, label, detailDepth));
@@ -499,9 +512,12 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
           .positive()
           .describe("目标产量，每分钟多少个（流体是 mB）。用户没说就先问他，别自己定一个数"),
         format: z
-          .enum(["markdown", "json", "tsv"])
+          .enum(["markdown", "json", "tsv", "html"])
           .default("markdown")
-          .describe("markdown 默认；tsv 是列式输出，省约 28% token；json 最贵但结构完整"),
+          .describe(
+            "markdown 默认；tsv 是列式输出，省约 28% token；json 最贵但结构完整；" +
+              "html 生成一个自包含的可交互网页（完整逐环节明细、可搜索）写到磁盘并只返回文件路径，用户想自己翻看/分享时用。",
+          ),
         detailDepth: z
           .number()
           .int()
@@ -526,6 +542,21 @@ export function registerTools(server: McpServer, manager: StoreManager): void {
         const plan = { ...full, root: prunePlan(full.root, detailDepth) };
         const label = itemLabel(s, item);
 
+        // html 用的是**未裁剪**的 full —— 网页就是给用户翻全量明细用的
+        if (format === "html") {
+          const p = writeExplorerFile(`plan-${item}-${ratePerMinute}`, renderPlanHtml(s, full, label));
+          const machineTotal = full.machines.reduce((a, m) => a + m.count, 0);
+          const machineNote =
+            full.machines.length === 0
+              ? "无机器环节（全是工作台合成）"
+              : `${machineTotal} 台机器（${full.machines.length} 种）`;
+          const energy = full.totalEnergyPerMinute == null ? "" : `、约 ${full.totalEnergyPerMinute} FE/分`;
+          return ok(
+            `📄 产线网页已生成：${p}\n` +
+              `概要：每分钟 ${ratePerMinute} 的 ${label} —— ${machineNote}、${full.rawMaterials.length} 种原料${energy}。\n` +
+              `网页含结论、缺口说明与完整逐环节明细。把路径告诉用户即可；要继续回答细节问题，用默认格式重新调用。`,
+          );
+        }
         if (format === "json") return ok(json(plan));
         if (format === "tsv") return ok(renderPlanTsv(s, plan, label, detailDepth));
         return ok(renderPlan(s, plan, label, detailDepth));
