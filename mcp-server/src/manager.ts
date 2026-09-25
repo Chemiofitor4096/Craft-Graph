@@ -11,7 +11,7 @@
 
 import { BridgeClient } from "./bridge.js";
 import { RecipeStore } from "./cache.js";
-import { computeFieldCoverage, renderFieldCoverage } from "./report.js";
+import { computeFieldCoverage, renderFieldCoverage } from "./coverage.js";
 import { BridgeHttpError, type RegistryPage } from "./types.js";
 
 /** 多久探测一次 Bridge 的状态。太短会浪费请求，太长会让配方重载后反应迟钝。 */

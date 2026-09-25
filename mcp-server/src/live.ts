@@ -25,7 +25,7 @@ import { encode } from "gpt-tokenizer";
 
 // 解析与渲染住在一起、由 smoke 的往返测试钉住 —— 这里曾因为「只在一侧有实现」而把
 // 机器覆盖度的分子分母取错，断言因此永远为真。
-import { parseFieldCoverage } from "./report.js";
+import { parseFieldCoverage } from "./coverage.js";
 import { resolveBridgeLocation } from "./config.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

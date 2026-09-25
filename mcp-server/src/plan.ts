@@ -124,6 +124,19 @@ export interface PlanNode {
   subtree?: { nodeCount: number };
 }
 
+/**
+ * raw 节点的两种理由文案 —— note（进 markdown / TSV）与 explorer 的明细必须同源。
+ *
+ * 两种含义完全不同，混起来会让「这个包**做不出**」和「**不用做**」分不清：
+ * `no_recipe` 是包的数据里没有能产出它的配方（得自己挖/刷），
+ * `user_declared` 是调用方声明「到此为止、别再展开」。
+ * 判定存在 {@link PlanNode.rawReason}，措辞只有这里一份。
+ */
+export const RAW_REASON_TEXT: Record<"no_recipe" | "user_declared", string> = {
+  no_recipe: "没有配方能产出它，视为基础原料",
+  user_declared: "用户指定为基础原料",
+};
+
 export interface PlanRawMaterial {
   item: string;
   kind: StackKind;
@@ -339,7 +352,7 @@ class PlanWalker extends ResolutionEngine {
     if (this.opts.rawMaterials.includes(id)) {
       node.status = "raw";
       node.rawReason = "user_declared";
-      node.note = "用户指定为基础原料";
+      node.note = RAW_REASON_TEXT.user_declared;
       this.addRaw(kind, id, rate);
       return node;
     }
@@ -373,7 +386,7 @@ class PlanWalker extends ResolutionEngine {
     if (candidates.length === 0) {
       node.status = "raw";
       node.rawReason = "no_recipe";
-      node.note = "没有配方能产出它，视为基础原料";
+      node.note = RAW_REASON_TEXT.no_recipe;
       this.addRaw(kind, id, rate);
       return node;
     }

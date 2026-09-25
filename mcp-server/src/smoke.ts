@@ -25,8 +25,8 @@ const { RecipeStore } = await import("./cache.js");
 const { buildRecipeTree, flattenTree, pruneTree, subtreeStats } = await import("./tree.js");
 const { pickCanonical } = await import("./resolution.js");
 const { calculatePlan, prunePlan } = await import("./plan.js");
-const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv, computeFieldCoverage, renderFieldCoverage, parseFieldCoverage } =
-  await import("./report.js");
+const { renderPlan, renderPlanTsv, renderTree, renderTreeTsv } = await import("./report.js");
+const { computeFieldCoverage, renderFieldCoverage, parseFieldCoverage } = await import("./coverage.js");
 const { renderPlanHtml, renderTreeHtml, writeExplorerFile } = await import("./explorer.js");
 const { opaqueHint } = await import("./opaque.js");
 

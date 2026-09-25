@@ -30,8 +30,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { cacheDir, type RecipeStore, type StackKind } from "./cache.js";
-import { type GapClassification, classifyGaps, collectMachineSteps } from "./report.js";
-import type { PlanNode, ProductionPlan } from "./plan.js";
+import {
+  type GapClassification,
+  classifyGaps,
+  collectMachineSteps,
+  machineStatus,
+  SKIP_REASON,
+} from "./report.js";
+import { RAW_REASON_TEXT, type PlanNode, type ProductionPlan } from "./plan.js";
 import type { TreeNode, TreeResult } from "./tree.js";
 import { VERSION } from "./version.js";
 
@@ -284,12 +290,8 @@ function legendHtml(): string {
   );
 }
 
-/** 落选原因的 HTML 说法。与 report.ts 的 SKIP_REASON 同义。 */
-const SKIP_HTML: Record<"cycle" | "probabilistic" | "user_choice", string> = {
-  cycle: "按规则它更优，但会构成循环依赖，已避开",
-  probabilistic: "按规则它更优，但它只把目标物品算作概率产出，产量算不准",
-  user_choice: "按规则它更优，但你（或调用方）指定了别的配方",
-};
+/** 落选原因的措辞（SKIP_REASON）与机器数状态（machineStatus）都从 report.ts 引入 ——
+ * 同一个事实要走两个出口时，判定与文案只能有一份实现。 */
 
 // ---------------------------------------------------------------- 产线
 
@@ -466,9 +468,11 @@ function planNodeHtml(store: RecipeStore, node: PlanNode, depth: number, ids: { 
   const badge = ST_BADGE[node.status] ? `<span class="st st-${esc(node.status)}">${esc(ST_BADGE[node.status])}</span>` : "";
 
   if (node.status === "craft") {
-    if (node.recipeType === "minecraft:crafting") {
+    // 判定来自 machineStatus（report.ts 独一份）；措辞是 HTML 介面的呈现
+    const ms = machineStatus(node);
+    if (ms === "manual") {
       bits.push(`<span class="mach">工作台（按次合成）</span>`);
-    } else if (node.machines != null) {
+    } else if (ms === "computed") {
       bits.push(`<span class="mach">${esc(node.machineId ? store.itemName(node.machineId) : "机器")} ×${node.machines}</span>`);
     } else {
       bits.push(`<span class="mach warn">台数未知</span>`);
@@ -487,7 +491,8 @@ function planNodeHtml(store: RecipeStore, node: PlanNode, depth: number, ids: { 
     facts.push(`输入从 #${esc(node.chosenFromTag)} 选定${alts}`);
   }
   if (node.status === "raw") {
-    facts.push(node.rawReason === "user_declared" ? "按调用方指定，视为基础原料" : "没有配方能产出它，视为基础原料");
+    // 文案与 plan.ts 写进 note 的是同一份（RAW_REASON_TEXT）—— 两个出口必须说同一句话
+    facts.push(RAW_REASON_TEXT[node.rawReason ?? "no_recipe"]);
   }
 
   // 落选候选 —— 语义与 report.ts 的 renderPlanNode 一致
@@ -499,8 +504,9 @@ function planNodeHtml(store: RecipeStore, node: PlanNode, depth: number, ids: { 
       const slots = a.inputSlots == null ? "读不懂输入" : `输入 ${a.inputSlots} 种`;
       const per = a.perCraft == null ? "产出读不懂" : `每次产 ${fmt(a.perCraft)}`;
       let note = "";
-      if (a.skipReason != null) note = ` —— <span class="why">${esc(SKIP_HTML[a.skipReason])}</span>`;
-      else if (chosenNoDuration && a.secondsPerCraft != null) {
+      if (a.skipReason != null) {
+        note = ` —— <span class="why">${esc(`按规则它更优，但${SKIP_REASON[a.skipReason]}`)}</span>`;
+      } else if (chosenNoDuration && a.secondsPerCraft != null) {
         note = ` —— 单次 ${fmt(a.secondsPerCraft)} 秒，<b>换它才算得出这个环节的台数</b>`;
       } else if (a.secondsPerCraft != null) note = `，单次 ${fmt(a.secondsPerCraft)} 秒`;
       return `<li><code>${esc(a.recipeId)}</code>（${esc(a.type)}，${slots}/${per}）${note}</li>`;
