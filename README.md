@@ -2,18 +2,15 @@
 
 # CraftGraph MCP
 
-**Query your Minecraft modpack's recipes from an AI client — and turn them into production plans.**
-
-English | [简体中文](README.zh_CN.md)
+**让 AI 读懂你的 Minecraft 整合包配方，并把它变成产线规划。**
 
 </div>
 
-CraftGraph connects a **running** Minecraft instance to an AI client (Claude Code, Cursor, …)
-over MCP. Ask *"how do I craft a torch"*, *"what can I use iron ingots for"*,
-*"how do I build a line for 10 steel ingots per minute"* — the AI queries the live recipe data
-of the pack you actually have loaded.
+CraftGraph 把**运行中**的 Minecraft 实例通过 MCP 接到 AI 客户端（Claude Code、Cursor 等）上。
+问它「火把怎么做」「铁锭能做什么」「每分钟 10 个钢锭的产线怎么建」——
+AI 查的是你**当前实际加载的整合包**的实时配方数据。
 
-Here is real output from a vanilla 1.21.1 instance, asking for a torch:
+下面是近原版 1.21.1 实例上的真实输出，问一个火把怎么做：
 
 ```text
 # 配方树：1 × 火把（minecraft:torch）
@@ -37,116 +34,175 @@ Here is real output from a vanilla 1.21.1 instance, asking for a torch:
 | 橡木原木（minecraft:oak_log） | 1 |
 ```
 
-Note what it got right: `#minecraft:coals` means "any of the coal items" and it picked coal,
-not charcoal; it merged the two separate plank slots of the stick recipe into `2 × oak_planks`;
-and the raw material answer is **1 oak log**, not 3 — because one log yields four planks.
+注意它做对的几件事：`#minecraft:coals` 的意思是「煤炭类任意一种」，它挑了煤炭而不是木炭；
+它把木棍配方里两个分开的木板槽位合并成了 `2 × 橡木木板`；
+而基础原料的答案是 **1 个橡木原木**，不是 3 个 —— 因为一个原木能出四块木板。
 
-## Why not just use a wiki
+## 为什么不直接用 wiki
 
-Recipe data in a modpack is not static. KubeJS scripts rewrite recipes at load time, datapacks
-override them, and every machine mod registers its own recipe types with its own semantics.
-A wiki — or a scraper — gives you vanilla. CraftGraph reads what your instance has loaded
-right now, including recipes that only exist at runtime.
+整合包里的配方不是静态的。KubeJS 脚本在加载时改写配方，数据包覆盖它们，
+每个机器模组注册自己的配方类型和自己的语义。wiki 或者爬虫给你的是原版，
+而 CraftGraph 读的是你实例**此刻**加载的东西，包括只在运行时存在的配方。
 
-## What it can do
-
-| | |
-|---|---|
-| **Search** | `search_items`, `get_registry`, `list_recipe_types`, `expand_tag` |
-| **Query recipes** | `get_recipes_for_output`, `get_recipes_for_input`, `get_recipe_details`, `find_alternative_recipes` |
-| **Plan** | `build_recipe_tree` (recursive chain), `calculate_production_plan` (machines, raw material rates, byproducts, energy) |
-| **Human-facing output** | Pass `format:"html"` to either planning tool for a self-contained interactive page (full detail, searchable, dark/light, opens offline); or use `npm run plan -- --item <id> --rate <per-minute>` to plan from the command line (falls back to the disk snapshot when the game is closed) |
-| **Diagnose** | `get_bridge_status`, `refresh_recipes` |
-
-Handled deliberately, because they are where naive tools produce wrong answers:
-
-- **Recipe cycles** — iron block = 9 iron ingots, iron ingot = 1/9 iron block. Detected with
-  two levels of lookahead, because a recipe whose *input* looks fine can still cycle one step later.
-- **Tag ingredients** — `#forge:ingots/iron` means "any of these"; the tool picks a concrete item,
-  shows which tag it came from, and lets you override the choice.
-- **Recipes it cannot read** — flagged `opaque` instead of returning empty inputs.
-  "No recipe" and "recipe I can't parse" are different answers, and the AI is told which one it got.
-- **Probabilistic outputs** — reported as expected values, explicitly labelled as such.
-
-## Requirements
+## 它能做什么
 
 | | |
 |---|---|
-| Minecraft | **1.21.1** (NeoForge 21.1.x) or **1.20.1** (MinecraftForge 47.2.0+) |
-| Side | **Client** — the mod reads from the client, so singleplayer and multiplayer both work |
-| Node.js | ≥ 20 (for the MCP server) |
+| **查询** | `search_items`、`get_registry`、`list_recipe_types`、`expand_tag` |
+| **配方检索** | `get_recipes_for_output`、`get_recipes_for_input`、`get_recipe_details`、`find_alternative_recipes` |
+| **规划** | `build_recipe_tree`（递归配方链）、`calculate_production_plan`（机器数、原料速率、副产、能耗） |
+| **给人看的输出** | 两个规划工具传 `format:"html"` 生成自包含交互网页（完整明细、可搜索、明暗切换，离线可开）；或 `npm run plan -- --item <id> --rate <每分钟>` 命令行直算（游戏没开也能用磁盘快照） |
+| **诊断** | `get_bridge_status`、`refresh_recipes` |
 
-## Install
+以下几件事是刻意处理的，因为它们是「天真实现会给出错误答案」的地方：
 
-Two halves, and **you need both** — the jar alone cannot answer anything, because all the
-recipe-tree and planning logic lives in the server.
+- **循环配方** —— 铁块 = 9 铁锭，铁锭 = 1/9 铁块。用**两级前瞻**检测，
+  因为一条配方的直接输入看起来没问题，展开一步之后却可能绕回来。
+- **标签输入** —— `#forge:ingots/iron` 的意思是「这类物品任意一个都行」。
+  工具会挑一个具体的，标明它来自哪个标签，并允许你覆盖这个选择。
+- **读不懂的配方** —— 标记为 `opaque`，而不是返回空的输入列表。
+  「没有配方」和「有配方但我读不懂」是两个不同的答案，AI 会知道它拿到的是哪个。
+- **概率产出** —— 按期望值给出，并明确标注它是期望值而不是保证值。
 
-**1. The mod** — from the
-[Releases page](https://github.com/Chemiofitor4096/Craft-Graph/releases), download the jar for
-your game version and put it in your mods folder:
+## 环境要求
 
-| Your game | Download |
+| | |
 |---|---|
-| Minecraft 1.21.1 + NeoForge | `craftgraph-<version>.jar` |
-| Minecraft 1.20.1 + Forge 47.2.0+ | `craftgraph-<version>-mc1.20.1.jar` |
+| Minecraft | **1.21.1**（NeoForge 21.1.x）或 **1.20.1**（MinecraftForge 47.2.0+） |
+| 安装侧 | **客户端** —— Mod 从客户端读取，所以单人和多人存档都能用 |
+| Node.js | ≥ 20（MCP Server 需要） |
 
-No release for your version? Build it yourself:
+两个 MC 版本各有一个 jar，按你的游戏版本选一个（装错版本游戏会直接报加载失败，不会静默不工作）。
+
+## 安装
+
+两半，**两个都要装** —— 只放 jar 是问不出任何东西的，配方树和产线计算全在 Server 侧。
+
+**1. Mod** —— 从 [Releases 页面](https://github.com/Chemiofitor4096/Craft-Graph/releases)
+下载对应你游戏版本的那个放进 mods 目录：
+
+| 你的游戏 | 下载 |
+|---|---|
+| Minecraft 1.21.1 + NeoForge | `craftgraph-<版本>.jar` |
+| Minecraft 1.20.1 + Forge 47.2.0+ | `craftgraph-<版本>-mc1.20.1.jar` |
+
+没有对应你游戏版本的 Release？自己构建：
 
 ```bash
 git clone https://github.com/Chemiofitor4096/Craft-Graph.git
 cd Craft-Graph/mod && ./gradlew build          # 1.21.1
-cd Craft-Graph/mod-1.20.1 && ./gradlew build   # 1.20.1 (needs JDK 17)
+cd Craft-Graph/mod-1.20.1 && ./gradlew build   # 1.20.1（需要 JDK 17）
 # → mod/build/libs/craftgraph-*.jar  /  mod-1.20.1/build/libs/craftgraph-*-mc1.20.1.jar
 ```
 
-**2. The MCP server** — not published to npm yet, so build it from source:
+**2. MCP Server** —— 还没发布到 npm，从源码构建：
 
 ```bash
 cd Craft-Graph/mcp-server && npm install && npm run build
 ```
 
-Then point your AI client at `mcp-server/dist/index.js`. For Claude Code:
+然后把 AI 客户端指向 `mcp-server/dist/index.js`。以 Claude Code 为例：
 
 ```jsonc
 {
   "mcpServers": {
     "craftgraph": {
       "command": "node",
-      "args": ["/absolute/path/to/Craft-Graph/mcp-server/dist/index.js"]
+      "args": ["/Craft-Graph 的绝对路径/mcp-server/dist/index.js"]
     }
   }
 }
 ```
 
-**No port or token to configure.** The mod writes `~/.craftgraph/bridge.json` on startup,
-and the MCP server finds it there. Both a vanilla-launcher and a third-party-launcher
-location are written, so custom game directories work too.
+**不需要配置端口或 token。** Mod 启动时会写 `~/.craftgraph/bridge.json`，
+MCP Server 自己去那里找。原版启动器和第三方启动器的位置都会写一份，所以自定义游戏目录也能用。
 
-Start Minecraft, load a world, and ask your AI client something. If it says it cannot reach
-the game, `get_bridge_status` will tell you exactly what is wrong.
+## 使用指南
 
-## Teach your AI client how to use it (optional, recommended)
+装好之后的完整使用路径，按「问一句 → 建产线 → 给人看」排列。
 
-`skill/craftgraph/SKILL.md` is a skill for AI clients: it teaches the workflow this tool
-assumes — confirm the target rate *before* planning, how to read depth / `opaque` / truncation,
-how to relay gaps honestly, and (the part that actually goes wrong) not to hand-recompute what
-the tool already computed.
+### 连接检查
 
-Install it by copying the directory into your client's skills folder:
+启动 Minecraft 并进入存档，Mod 会自动在本地起一个只读 HTTP 服务。
+日志里出现 `CraftGraph bridge started on /127.0.0.1:25585` 和
+`CraftGraph snapshot rebuilt: …` 两行，就是服务起来了、配方索引好了。
+然后随便问 AI 客户端一句「现在连上游戏了吗」—— 它会调 `get_bridge_status`，
+能报出配方数量就是通了。
+
+### 怎么问
+
+| 你想问 | 直接说 | 背后的工具 |
+|---|---|---|
+| 某个东西怎么做 | 「火把怎么做」「下界合金头盔需要什么」 | `build_recipe_tree` |
+| 某个东西能用来做什么 | 「铁锭能做什么」「这个废料有什么用」 | `get_recipes_for_input` |
+| 建产线 | 「每分钟 10 个钢锭要几台机器、耗多少原料」 | `calculate_production_plan` |
+| 换一种做法 | 「铁锭还有别的做法吗」「哪条更省」 | `find_alternative_recipes` |
+
+两件小事值得知道：
+
+- **规划产线前先把产量说清楚**（每分钟多少个）。AI 被要求没听到产量就先问你，
+  而不是替你猜一个 —— 产量会一路乘进原料表和机器台数，猜的数字看不出来。
+- 回答里出现 `#标签`、`opaque`、`被截断` 这类标注时，让 AI 解释或照实转达。
+  它们是「这里的数据有讲究 / 有缺口」的信号，不是报错 ——
+  这个工具的哲学是宁可明说读不到，也不编一个看起来完整的答案。
+
+### 输出格式：给 AI 看的，和给人看的
+
+默认的 markdown 输出为模型上下文优化：默认只展开前三层结构，但**基础原料永远是全树算出来的**。
+要看更深的层级用 `detailDepth`；结果特别大时用 `format:"tsv"`（省约 28% token）；
+要程序化处理用 `format:"json"`。
+
+**给人看的**：`build_recipe_tree` / `calculate_production_plan` 传 `format:"html"`，
+会生成一个**自包含网页**到 `~/.craftgraph/cache/explorer/` ——
+完整逐环节明细（不裁剪）、可搜索、明暗切换、不联网也能打开。AI 只会回给你一个文件路径。
+适合核对一条复杂产线的每个环节，或者直接发给队友看。
+
+### 不用 AI 客户端：命令行
+
+```bash
+cd mcp-server
+npm run plan -- --item create:brass_ingot --rate 100           # 产线规划（markdown 打到终端）
+npm run plan -- --item create:brass_ingot --rate 100 --html    # 同样的内容生成网页
+npm run plan -- --item minecraft:iron_pickaxe --count 1 --tree # 配方树
+```
+
+数据源和 MCP 完全相同：游戏开着读实时，没开着读磁盘快照 —— 所以**离线可用**。
+给整合包作者在不启动 AI 客户端的情况下快速验证一条产线用。
+
+### 游戏没开时
+
+MCP Server 会退回磁盘上的上次快照（`~/.craftgraph/cache/`），查询照常工作，
+但结果会明确标注「离线快照，数据可能过时」。改了整合包或 KubeJS 脚本之后，
+开一次游戏进世界，快照就会自动刷新。
+
+### 排查
+
+| 症状 | 先看 |
+|---|---|
+| AI 说连不上游戏 | 游戏是否已进入存档；`~/.craftgraph/bridge.json` 是否存在；让 AI 调 `get_bridge_status` 看输出 |
+| 查什么都说没有 | 游戏可能还在加载（状态是 `ready: false`），进世界后重试 —— 不是坏了 |
+| 大量配方「读不懂」 | 跑 `npm run inspect`，按配方类型列出读不懂的数量和原因 |
+| 怀疑数据太旧 | 让 AI 调 `refresh_recipes`，或对比 `get_bridge_status` 里的 dataVersion 有没有变 |
+
+## 给 AI 客户端装这个 skill（可选，但推荐）
+
+`skill/craftgraph/SKILL.md` 是给 AI 客户端用的 skill：它把这套工具期望的工作流写清楚了 ——
+**先确认产量再规划**、怎么读「深度 / opaque / 截断」、缺口怎么如实转达，
+以及最容易出错的那条：**不要手工重算工具已经算过的东西**。
+
+安装就是把目录复制进客户端的 skills 目录：
 
 ```bash
 cp -r skill/craftgraph ~/.claude/skills/     # Claude Code
 cp -r skill/craftgraph ~/.zcode/skills/      # ZCode
 ```
 
-Without it the model still works, but it tends to re-derive rates by hand and to scatter the
-"here is what this plan cannot tell you" notes through the answer.
+不装也能用，但模型倾向于自己重算一遍速率，并把「这份规划算不出什么」散落在正文各处。
 
-## Use it as a dependency
+## 作为依赖使用
 
-The mod is also published to **KessokuMaven**, so you can depend on it instead of building it
-from source. The intended use is writing your own client for the bridge protocol and reusing
-its DTOs (`dev.craftgraph.api.Models`) instead of re-declaring them by hand.
+Mod 也发布到了 **KessokuMaven**，可以不从源码构建，直接依赖它。主要用途是：你想自己写一个
+对接 bridge 协议的客户端时，复用它的 DTO（`dev.craftgraph.api.Models`），不用手工再抄一遍。
 
 ```groovy
 repositories {
@@ -154,183 +210,164 @@ repositories {
 }
 
 dependencies {
-    // Compile against the DTOs only. To also load the mod at runtime, put the jar in mods/.
+    // 只在编译期用到 DTO 就写 compileOnly；要在运行时也加载这个 Mod，把 jar 放进 mods 目录
     compileOnly 'dev.craftgraph:craftgraph:0.3.4'            // Minecraft 1.21.1
-    // The 1.20.1 build publishes under its own artifact id:
+    // 1.20.1 那个产物用的是另一个 artifactId：
     // compileOnly 'dev.craftgraph:craftgraph-mc1.20.1:0.3.4'
 }
 ```
 
-A sources jar is published alongside, so the DTOs are readable from your IDE. They are a
-direct mirror of [`doc/protocol.md`](doc/protocol.md) — **that document is the real contract**,
-and it is the one to follow if the two ever disagree.
+同时发布了 sources jar，DTO 在 IDE 里可以直接看。它们是
+[`doc/protocol.md`](doc/protocol.md) 的逐字镜像 —— **那份文档才是真正的契约**，
+两者冲突时以文档为准。
 
-Browse published versions: <https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph>
+浏览已发布的版本：<https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph>
 
-## How it works
+## 它是怎么工作的
 
 ```text
-AI client (Claude Code / Cursor)
+AI 客户端（Claude Code / Cursor）
       │  MCP (stdio)
       ▼
-MCP server (TypeScript)          recipe trees, production plans, caching
-      │  HTTP + WebSocket, 127.0.0.1 only, Bearer token
+MCP Server（TypeScript）          配方树、产线计算、缓存
+      │  HTTP + WebSocket，仅 127.0.0.1，Bearer token
       ▼
-Bridge mod (Java / NeoForge)     reads recipes, builds indexes, serves them
+桥接 Mod（Java / NeoForge）        读配方、建索引、提供服务
       │  RecipeManager
       ▼
-Minecraft 1.21.1 + your modpack
+Minecraft 1.21.1 + 你的整合包
 ```
 
-Two design decisions worth knowing about:
+有两个设计决定值得了解：
 
-**The mod is a dumb data source.** All graph and planning logic lives in the TypeScript
-server, because the mod runs inside a fragile environment: algorithms there cannot be tested
-without launching the game, and a game crash would take them down with it.
+**Mod 只是个笨数据源。** 所有图算法和产线逻辑都在 TypeScript 侧，因为 Mod 跑在一个脆弱的
+环境里：放在那里的算法没法脱离游戏测试，而且游戏一崩会连带它们一起挂。
 
-**The mod serves immutable snapshots, not live queries.** Iterating a modpack's recipe
-manager is main-thread-only work. Doing it per HTTP request means the game stutters every
-time the AI asks something. Instead the snapshot is built once when recipes load (and rebuilt
-on reload), so the request path never touches a game object — which also removes an entire
-class of threading bugs.
+**Mod 提供的是不可变快照，不是实时查询。** 遍历整合包的配方管理器只能在主线程做。
+每次 HTTP 请求都做一遍，意味着 AI 每问一句游戏就卡一下。所以快照在配方加载时构建一次
+（重载时重建），请求路径上完全不接触游戏对象 —— 这同时消掉了一整类线程 bug。
 
-## Documentation
+## 文档
 
-| Document | Contents |
+| 文档 | 内容 |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Instructions for AI coding agents working in this repo — what to read first and the rules that prevent silently wrong answers |
-| [`doc/protocol.md`](doc/protocol.md) | The bridge HTTP contract — the single source of truth for both halves |
-| [`doc/decisions.md`](doc/decisions.md) | Locked technical decisions and what changing them would cost |
-| [`doc/development.md`](doc/development.md) | Dev setup, the four test layers, token measurements, lessons learned |
-| [`doc/format-evaluation.md`](doc/format-evaluation.md) | Measured evaluation of output formats, including a compact DSL proposal |
+| [`AGENTS.md`](AGENTS.md) | 给在这个仓库里干活的 AI 的说明 —— 先读什么、以及哪些规则违反了会出静默错误答案 |
+| [`doc/protocol.md`](doc/protocol.md) | Bridge HTTP 契约 —— 两侧唯一的约定 |
+| [`doc/decisions.md`](doc/decisions.md) | 已锁定的技术决策，以及改动它们要付什么代价 |
+| [`doc/development.md`](doc/development.md) | 开发环境、四层测试、token 测量、踩过的坑 |
+| [`doc/format-evaluation.md`](doc/format-evaluation.md) | 输出格式的实测评估，含对紧凑 DSL 方案的评估 |
 
-## Status
+## 当前状态
 
-Verified end to end on a real 1.21.1 instance: 1290 recipes indexed, 2% flagged unreadable,
-~40 ms main-thread extraction, AI client connected with zero configuration.
+在真实的 1.21.1 实例上端到端验证过：索引 1290 条配方、2% 标记为读不懂、
+主线程抽取约 40ms、AI 客户端零配置连接成功。
 
 | | |
 |---|---|
-| Bridge mod | Works. 107 JUnit tests, none of which need Minecraft |
-| MCP server | Works. 41 algorithm tests, MCP protocol tests, cross-language contract tests |
-| Recipe coverage | All recipe types are read. 5 of the 7 types present in vanilla are 100% readable |
-| Machine & duration data | Every recipe gets a machine; the 112 cooking recipes get a duration. Energy is not exposed by vanilla at all — it stays `null` rather than being invented |
-| Smithing recipes | Read via an access transformer, the same way JEI does it. Netherite upgrades are fully readable; armour trims are read as far as they can honestly be |
-| Modded recipes | Not yet measured — see limitations below |
-| Recipe viewer integration | Not started. JEI first, EMI optional — see limitations below |
-| In-game UI | Out of scope for the MVP by design |
+| 桥接 Mod | 可用。168 个 JUnit 用例，都不需要启动 Minecraft |
+| MCP Server | 可用。74 项算法冒烟检查、MCP 协议测试、跨语言契约测试 |
+| 配方覆盖 | 所有配方类型都会被读到。原版存在的 7 种类型里有 5 种 100% 可读 |
+| 机器与耗时数据 | 每条配方都有机器；112 条熔炼类配方有耗时。能耗原版根本没有这个数据，**宁可为 null 也不编** |
+| 锻造配方 | 靠访问转换器读出，做法与 JEI 相同。下界合金升级完全可读；盔甲纹饰读到了它诚实的上限 |
+| 模组配方 | Create 已有适配器（多产出、概率、双向流体、加工耗时、序列组装）。**其余模组未测量** |
+| 配方查看器集成 | 未开始。JEI 优先、EMI 可选 —— 见下方限制 |
+| 游戏内 UI | 按设计不在 MVP 范围内 |
 
-## Known limitations
+## 已知限制
 
-**Unreadable recipes are real, and they are counted.** On vanilla, 31 of 1290 recipes are
-flagged `opaque`: 18 armour trims and 13 code-driven special recipes (dyeing, map cloning,
-fireworks, banner duplication). Run `npm run inspect` to see the breakdown by recipe type for
-your own pack.
+**读不懂的配方是真实存在的，而且被计数。** 原版 1290 条里有 31 条标记为 `opaque`：
+18 条盔甲纹饰，13 条代码驱动的特殊合成（染色、地图复制、烟花、旗帜复制）。
+想看你自己整合包按类型的分解，运行 `npm run inspect`。
 
-There is a third case worth knowing about: some recipe types **produce nothing at all** — fuel
-definitions such as `createaddition:liquid_burning` or `petrochem:*_fuel` read as "burn this,
-get energy". Their inputs are read fine and their output really is empty, so labelling them
-`opaque` would make the AI say "I cannot read this" when the truth is "this produces nothing".
-They carry `producesNothing: true` instead. Only an adapter that has actually read that recipe
-type's own output fields is allowed to claim this — a recipe whose output merely *could not be
-read* stays `opaque`.
+还有第三种情况值得知道：有些配方类型**根本不产出东西** —— 燃料定义
+（`createaddition:liquid_burning`、`petrochem:*_fuel`）描述的是「烧掉什么换能量」。
+它们的输入读得到、产出确实是空的，所以标成 `opaque` 会让 AI 说「这条我读不懂」，
+而真相是「它不产出东西」。这类配方带 `producesNothing: true`。
+只有**真读过该类型自己的产出字段**的适配器才能这样声明 —— 产出只是**没读到**的配方仍然是 `opaque`。
 
-The 13 code-driven specials cannot be fixed by anyone: their logic lives in Java, they declare
-no ingredients, and recipe viewers special-case them for display rather than reading them.
-`opaque` is the honest answer here, and the AI is told to say "I cannot read this" instead of
-"this needs no materials".
+那 13 条特殊合成**谁都修不了**：逻辑写在 Java 里，不声明任何输入，
+视图器也只是特判显示而不是读出来。这里 `opaque` 就是诚实答案，
+AI 被告知要说「这条我读不懂」而不是「这配方不需要材料」。
 
-The 18 armour trims are a different story, and worth understanding because they show where the
-line is. Their inputs **are** readable — `SmithingRecipe` does not override `getIngredients()`,
-but the three slots sit in package-private fields, so the mod ships an
-`META-INF/accesstransformer.cfg` that makes them public (this is exactly what JEI does). What is
-*not* representable is the output: `SmithingTrimRecipe#getResultItem()` returns a hardcoded
-placeholder (`new ItemStack(Items.IRON_CHESTPLATE)` with the first trim pattern and redstone),
-because the real result is combinatorial — any trimmable armour piece, with the trim applied.
-So trims report their three inputs and an explicitly empty output, which keeps them `opaque`
-with the reason "output unreadable" rather than the earlier "input and output both unreadable".
+18 条盔甲纹饰是另一回事，而且值得讲清楚，因为它划出了边界在哪。
+它们的输入**是读得到的** —— `SmithingRecipe` 确实不覆写 `getIngredients()`，
+但三个槽位在包私有字段里，所以 Mod 带了一份 `META-INF/accesstransformer.cfg`
+把它们变公开（JEI 做的就是同一件事）。真正无法表达的是**产出**：
+`SmithingTrimRecipe#getResultItem()` 返回一个硬编码的占位符
+（`new ItemStack(Items.IRON_CHESTPLATE)` 再挂上第一个纹饰和红石），
+因为真实产物是组合式的 —— 任意可饰纹盔甲 + 纹饰。
+所以纹饰现在报出三个输入和一个明确的空产出，仍然是 `opaque`，
+但原因变成了「读不到产出」，而不是之前的「输入和产出都读不到」。
 
-That placeholder is worth a warning for anyone touching this code: **fixing only the inputs
-would have been worse than doing nothing.** Once the inputs are non-empty, `Readability` stops
-flagging the recipe, and that hardcoded iron chestplate goes from "a marked placeholder" to "a
-confidently wrong answer". The adapter therefore suppresses the generic result explicitly for
-trims.
+**那个占位符值得给后来人一句警告：只修输入会比不修更糟。**
+输入一旦非空，`Readability` 就不再标记这条配方，于是那个硬编码的铁胸甲
+从「一个被标记的占位符」变成「一个理直气壮的答案」。
+所以适配器对纹饰显式丢弃了通用接口的产物。
 
-Observed behaviour before the fix, when asked "how do I make a netherite helmet": the AI relayed
-"the input cannot be read, and that does not mean it needs no materials" — then described the
-vanilla recipe from its own training data, explicitly labelled as not coming from the game. On
-vanilla that happened to be right; on a modpack, where a KubeJS script or another mod may have
-changed it, the same sentence would be confidently wrong. **`opaque` prevents a *silent* wrong
-answer; it does not stop the model from filling the gap with memory** — which is why widening
-real coverage matters more than the coverage percentage suggests.
+修复前实测的表现：问「下界合金头盔怎么做」时，AI 如实转达了
+「输入读不出来，这不代表它不需要原料」—— 然后凭自己的训练数据补出了原版做法，
+并标注了「这不是从游戏数据里读到的」。原版上那恰好是对的；
+但整合包里 KubeJS 或别的模组可能改过，同样一句话就会变成**理直气壮的错误答案**。
+**`opaque` 防的是「静默的错误答案」，防不住模型用记忆把空缺补上** ——
+所以把真实覆盖率做上去，比覆盖率那个百分比看起来的更值钱。
 
-**Machine counts only cover part of the chain.** Vanilla has no duration field for crafting
-recipes, so workbench steps are reported as manual rather than as a machine count. That is
-correct — you do not build a crafting table per craft — but it means a plan for something like
-a torch reports machines only for the smelting step. `get_bridge_status` states the coverage
-numbers explicitly so the AI can caveat its answer.
+**机器数只覆盖链条的一部分。** 原版合成配方没有耗时字段，所以工作台环节被报成「手工」
+而不是机器数。这是对的 —— 你不会为每次合成造一张工作台 —— 但意味着像火把这样的目标，
+只有熔炼那一环会给出机器数。`get_bridge_status` 会明确报出覆盖率，
+让 AI 在回答里说清这一点。
 
-**Modded machine recipes are partly covered, and a recipe viewer can only fix part of the
-rest.** Inspecting Create's own recipe data (1843 recipes, 15 of its own types) showed what
-those recipes look like: inputs are declared declaratively, but `results` is a *list* with
-per-entry `count` and `chance`, `processingTime` carries the duration, and fluids appear
-alongside items in both directions.
+**模组机器配方已经覆盖了一部分，而剩下的那部分视图器也只能解决一半。**
+看你给的 Create 配方数据（1843 条，其中 15 种是它自己的类型）能看到它们长什么样：
+输入是声明式的，但 `results` 是个**列表**，每条带 `count` 和 `chance`；
+`processingTime` 才是耗时；流体和物品在两个方向上混在一起。
 
-So the mod now ships a Create adapter (soft dependency — no Create installed, no adapter, and
-no crash) that reads all four: multiple outputs, per-output probability, fluids both ways, and
-the processing time. That turns a Create crushing recipe from "1 of 3 outputs, no probabilities,
-no duration" into the real thing — and `processingTime` is what lets Create machines get a real
-machine count. **No recipe viewer can supply that**: JEI and EMI expose no concept of duration at
-all.
+所以 Mod 现在带了一个 Create 适配器（软依赖 —— 没装 Create 就不注册，也不会崩），
+把这四样全读了：多个产出、每个产出的概率、两个方向的流体、以及加工耗时。
+一条 Create 粉碎配方因此从「3 个产出只回来 1 个、没有概率、没有耗时」变成真实数据 ——
+而 `processingTime` 正是让 Create 机器算出真实台数的东西。**这一点任何视图器都给不了**：
+JEI 和 EMI 的 API 里根本没有「耗时」这个概念。
 
-What is still missing, and why it is not a viewer problem either:
+还没做的，以及为什么它们同样不是视图器问题：
 
-- `sequenced_assembly` was the other gap and is now flattened properly. It nests a whole list of
-  sub-recipes, so reading it naively would *look* readable while omitting most of the real
-  material cost. The adapter reads Create's own source semantics rather than guessing: the pass
-  count is `sequence.size() × loops` (so every step's ingredients are consumed `loops` times),
-  and the `results` list carries **weights, not probabilities** (`getOutputChance()` is
-  `weight / totalWeight`). It also drops the **transitional item** from each step's inputs —
-  that item is produced in-line, and leaving it in would put something the player cannot obtain
-  into the raw-material list. The total processing time is reported too, which downstream turns
-  into a count of parallel assembly lines.
-- **Machine names for modded recipes need JEI.** Create does not override `getToastSymbol()`,
-  so its recipes get the interface default (`crafting_table`) which we deliberately refuse to
-  trust — and there is no reliable way to derive the machine from the recipe type either
-  (Create's sandpaper is an *item*, splashing and haunting share one machine, filling/emptying
-  split across a spout and a drain, and a sequenced assembly line is several blocks). JEI's
-  catalysts are the authoritative answer, which is why JEI is the first viewer to integrate
-  rather than EMI.
-- Energy is still `null` everywhere.
+- `sequenced_assembly` 是另一个缺口，现在已经正确展开了。它嵌套了一整串子配方，
+  按朴素方式读会**看起来可读**、实际漏掉大部分原料成本。适配器读的是 Create 自己的源码语义
+  而不是猜：总步数是 `sequence.size() × loops`（所以每一步的原料要吃 `loops` 次），
+  而 `results` 里装的是**权重不是概率**（`getOutputChance()` 就是 `权重 / 权重和`）。
+  它还会把每一步输入里的**中间产物**剔除 —— 那是线上自己造出来的过渡物品，
+  留着会让原料表里出现一个玩家根本拿不到的东西。总加工耗时也一并报出来，
+  下游据此算出的台数就是「几条并行组装线」。
+- **模组配方的机器名得靠 JEI。** Create 没有覆写 `getToastSymbol()`，
+  于是它的配方拿到接口默认值（`crafting_table`），而我们的策略是刻意不信任这个默认值；
+  从配方类型反推也不可靠（Create 的砂纸是**物品**不是方块，洗涤和灼烧共用一台机器，
+  注液/排液分散在 Spout 和 Item Drain 上，而一条组装线本身就是好几个方块）。
+  JEI 的催化剂才是权威答案 —— 这就是为什么第一个要接的视图器是 JEI 而不是 EMI。
+- 能耗仍然全是 `null`。
 
-**Measured on a real Create-focused pack.** A medium pack built around Create
-(15,241 recipes, 3,585 tags, 70 recipe types) gave these numbers:
+**已经在真实的 Create 专精整合包上测过。** 一个以 Create 为核心的中型包（15,241 条配方、
+3,585 个标签、70 种配方类型）实测：
 
 | | |
 |---|---|
-| Unreadable recipes | 632 / 15,241 (**4%**) |
-| Main-thread extraction | **155 ms** (indexing 2 ms) |
-| Recipes with a duration | 572 / 15,241 (3.8%) — all of them vanilla cooking types |
-| Recipes with a machine | 10,945 / 15,241 (71.8%) |
+| 读不懂的配方 | 632 / 15,241（**4%**） |
+| 主线程抽取 | **155 ms**（建索引 2 ms） |
+| 带耗时的配方 | 572 / 15,241（3.8%）—— 全是原版熔炼类 |
+| 带机器名的配方 | 10,945 / 15,241（71.8%） |
 
-Two things stand out. The 3.8% duration coverage is why Create machines got no machine
-counts: **no modded recipe type carried a duration**, because the duration lives in each
-mod's own field and there was no adapter for it. And the 28% without a machine are all
-modded machine types — a recipe viewer's catalysts are the only reliable source for those,
-which is the concrete reason JEI is worth integrating.
+两个数字值得注意。耗时只覆盖 3.8%，正因为**没有任何模组配方类型带耗时** ——
+耗时藏在各模组自己的字段里，而那时还没有对应适配器。而 28% 没有机器名的
+全是模组机器类型，只有视图器的催化剂能可靠给出 —— 这就是 JEI 值得接的具体理由。
 
-`/snapshot` for this pack is ~10 MB of JSON. The extraction cost scales with recipe count
-(155 ms at 15k ≈ 10 µs/recipe), so 50,000 recipes would land near 500 ms — over the 200 ms
-budget, and the point where frame-slicing becomes necessary rather than optional.
+这个包的 `/snapshot` 约 10 MB JSON。抽取耗时随配方数线性增长
+（15k 时 155ms ≈ 10 µs/条），5 万条大致落在 500ms —— 超过 200ms 预算，
+到那时分帧切片就从「可选」变成「必须」。
 
-**Earlier measurements come from a near-vanilla instance** (1,290 recipes), so token figures
-in this README are quoted from there unless stated otherwise.
+**更早的测量来自近原版实例**（1290 条配方），本文里没标明的 token 数字都出自那里。
 
-**Supports 1.21.1 (NeoForge) and 1.20.1 (MinecraftForge 47.2.0+).** No Fabric, no other versions.
+**支持 1.21.1（NeoForge）与 1.20.1（MinecraftForge 47.2.0+）。** 没有 Fabric，没有其他版本。
 
-The 1.20.1 build shares the same algorithms and protocol (`core/`); known differences between
-the two are written down in [doc/porting-1.20.1.md](doc/porting-1.20.1.md).
+1.20.1 那一侧是后来补的，共享同一套算法与协议（`core/`），请优先在 1.21.1 上验证过的功能为准 ——
+两个版本的已知差异记在 [doc/porting-1.20.1.md](doc/porting-1.20.1.md)。
 
-## License
+## 许可
 
-MIT — see [LICENSE](LICENSE).
+MIT —— 见 [LICENSE](LICENSE)。
