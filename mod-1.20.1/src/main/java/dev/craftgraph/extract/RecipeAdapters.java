@@ -44,7 +44,10 @@ public final class RecipeAdapters {
                             // 序列组装不是 ProcessingRecipe 的子类，所以是另一个适配器。
                             // 两个都在同一个 isLoaded 判断下 —— 它们共用一份 Create 软依赖。
                             // （Create 在 1.20.1 上还多了个 CreateFluids 帮手，在适配器内部用。）
-                            new Candidate<>("create", "Create（序列组装）", SequencedAssemblyAdapter::new)),
+                            new Candidate<>("create", "Create（序列组装）", SequencedAssemblyAdapter::new),
+                            // 机器配方全在 requirement 里，通用接口读不到输入产出。
+                            // 读法见 CustomMachineApi 的类注释（反射桥，因为 CM 没有可用 maven）。
+                            new Candidate<>("custommachinery", "Custom Machinery", CustomMachineAdapter::new)),
                     modId -> ModList.get().isLoaded(modId));
             registry = r;
         }
@@ -63,6 +66,16 @@ public final class RecipeAdapters {
     /** 读耗时（游戏刻）。没有适配器能处理、或适配器读不到时返回 {@code null}。 */
     public static Integer duration(Recipe<?> recipe) {
         return registry().duration(recipe);
+    }
+
+    /** 读机器 id。{@code null} 表示退回 {@link MachineTable} 的推断。 */
+    public static String machine(Recipe<?> recipe) {
+        return registry().machine(recipe);
+    }
+
+    /** 这条配方是否被完整读出。{@code false} 时 extractor 会把整条标成 opaque。 */
+    public static boolean complete(Recipe<?> recipe) {
+        return registry().complete(recipe);
     }
 
     /**

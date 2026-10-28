@@ -235,12 +235,20 @@ public final class RecipeExtractor {
         boolean declaredNoOutput = RecipeAdapters.declaresNoOutput(recipe);
 
         Readability.Outcome verdict = Readability.outcome(inputCount, outputCount, opaque, declaredNoOutput);
-        opaque = verdict == Readability.Outcome.OPAQUE;
-        boolean producesNothing = verdict == Readability.Outcome.PRODUCES_NOTHING;
+        // 适配器声明「只读懂了一部分」时，整条也要标 opaque —— 一份「看起来完整、
+        // 少了战利品表产出」的原料表，比「读不懂」危险得多。见 RecipeTypeAdapter#complete。
+        boolean partial = !RecipeAdapters.complete(recipe);
+        opaque = verdict == Readability.Outcome.OPAQUE || partial;
+        boolean producesNothing = verdict == Readability.Outcome.PRODUCES_NOTHING && !partial;
 
         // 类型特有的字段：耗时、机器。
         Integer duration = RecipeAdapters.duration(recipe);
-        String machine = MachineTable.machineFor(typeId, toastItemId(recipe));
+        // 机器优先问适配器：Custom Machinery 的机器不是方块 id，而是它自己的 machine id。
+        // 适配器不认这条配方时返回 null，再退回 MachineTable 的推断。
+        String machine = RecipeAdapters.machine(recipe);
+        if (machine == null) {
+            machine = MachineTable.machineFor(typeId, toastItemId(recipe));
+        }
 
         // 记一份覆盖度，由 ClientBridge 打进日志。没有适配器匹配的字段恒为 null，
         // 而 null 会被产线计算当作「未知」——所以「哪些类型一条都没读到」必须留下痕迹。

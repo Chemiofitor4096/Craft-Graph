@@ -187,6 +187,30 @@ public final class AdapterRegistry<T> {
     }
 
     /**
+     * 读机器 id。
+     *
+     * @return 适配器给的机器；没有适配器能处理、或适配器声明「不归我管」时返回
+     *         {@code null}，由调用方退回 {@link MachineTable} 的推断
+     */
+    public String machine(T recipe) {
+        RecipeTypeAdapter<T> adapter = forRecipe(recipe);
+        if (adapter == null) return null;
+        return guarded(adapter, "machine", () -> adapter.machine(recipe), null);
+    }
+
+    /**
+     * 这条配方是否被完整读出。
+     *
+     * <p>异常时返回 {@code true}（不额外降级）—— 与 {@link #declaresNoOutput} 同理：
+     * 失败应该表现为「少一个适配器」，而不是把整批配方判成 opaque。
+     */
+    public boolean complete(T recipe) {
+        RecipeTypeAdapter<T> adapter = forRecipe(recipe);
+        if (adapter == null) return true;
+        return guarded(adapter, "complete", () -> adapter.complete(recipe), Boolean.TRUE);
+    }
+
+    /**
      * 读输入槽位（物品）。
      *
      * @param generic 通用接口（{@code getIngredients()}）读出来的槽位

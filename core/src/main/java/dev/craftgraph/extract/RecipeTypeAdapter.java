@@ -75,6 +75,37 @@ public interface RecipeTypeAdapter<T> {
     }
 
     /**
+     * 机器 id。
+     *
+     * <p>通用路径（{@link MachineTable}）靠配方类型和 toast symbol 推断机器，但有些模组的
+     * 机器不是「一个方块」：Custom Machinery 的所有机器共用
+     * {@code custommachinery:custom_machine} 一个方块，真正的身份在
+     * {@code getMachineId()}（如 {@code dut:assembling_machine}）里。
+     * 不覆盖这个方法，这些配方要么机器为 null、要么全被合并成同一台机器。
+     *
+     * @return 机器 id；{@code null} 表示「不归我管」，上层退回 {@link MachineTable} 的推断
+     */
+    default String machine(T recipe) {
+        return null;
+    }
+
+    /**
+     * 这条配方是不是**被完整读出来了**。
+     *
+     * <p>有些适配器只能读懂一部分：Custom Machinery 的 requirement 有三十种，其中
+     * 战利品表、掉落、物品转换会产出东西，但产出不是声明式的。这时正确的答案是
+     * 「读到了这些，但不敢保证完整」—— 上层把整条配方标 {@code opaque}，
+     * 而不是报告一份看起来完整、实际少了东西的原料表。
+     *
+     * <p>默认 {@code true}：现有适配器要么全读、要么用 {@code null} / 空列表表达读不到。
+     *
+     * @return {@code false} 表示「读懂了一部分，但还有没读懂的东西」
+     */
+    default boolean complete(T recipe) {
+        return true;
+    }
+
+    /**
      * 输入槽位（物品）。通用接口读不到（或读不对）时由适配器提供。
      *
      * @return {@code null} 表示用通用接口的结果；空列表表示确定读不到输入

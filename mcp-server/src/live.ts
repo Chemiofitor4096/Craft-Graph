@@ -529,6 +529,79 @@ try {
     }
   }
 
+  // ============================================================ Custom Machinery（软依赖适配器）
+  //
+  // CM 的输入输出全在一串 requirement 里，通用接口读不到 —— 修复前这批配方
+  // 全部是 opaque，而且**按产出反查也查不到**（产出未知，建不了索引）。
+  // 症状比 opaque 更容易误导：工具会回答「没有配方」。
+  //
+  // 和 Create 一样是软依赖：没装就明确报「未验证」，不算通过。
+  const hasCustomMachinery = allTypes.includes("`custommachinery:custom_machine`");
+  if (!hasCustomMachinery) {
+    skippedSections.push("Custom Machinery 适配器（本实例没装 Custom Machinery）");
+    process.stdout.write(
+      "\n⚠️  本实例没装 Custom Machinery，**CM 适配器这段没有验证**。\n" +
+        "   requirement 的编码/解析只有装了 CM 才跑得到。\n\n",
+    );
+  } else {
+    process.stdout.write("检测到 Custom Machinery（custommachinery:custom_machine）\n");
+
+    // 回归用例：这个物品当初就是「工具说没有配方」的那个。
+    // 它由 DUT 整合包定义，别的包不一定有 —— 没有就明确跳过，不算通过。
+    const cmProbe = "kubejs:productivity_module";
+    const cmSearch = textOf(
+      await client.callTool({ name: "search_items", arguments: { query: "productivity_module" } }),
+    );
+    if (!cmSearch.includes(cmProbe)) {
+      skippedSections.push("Custom Machinery 样本（本实例没有 productivity_module）");
+      process.stdout.write(`\n⚠️  本实例没有 ${cmProbe}，CM 的具体配方**未验证**。\n\n`);
+    } else {
+      const cmList = textOf(
+        await client.callTool({ name: "get_recipes_for_output", arguments: { item: cmProbe } }),
+      );
+      check(
+        "CM 配方能按产出反查到（修复前这里回答「没有找到配方」）",
+        !cmList.includes("没有找到产出") &&
+          cmList.includes("dut_create:assembling_machine/productivity_module"),
+        cmList.slice(0, 600),
+      );
+
+      const cmDetail = textOf(
+        await client.callTool({
+          name: "get_recipe_details",
+          arguments: { recipeId: "dut_create:assembling_machine/productivity_module" },
+        }),
+      );
+      process.stdout.write(
+        `\n· CM 样本 → \`dut_create:assembling_machine/productivity_module\`\n${cmDetail}\n\n`,
+      );
+
+      check(
+        "CM 配方读到了机器 id（不是方块 custommachinery:custom_machine）",
+        parseMachine(cmDetail) === "dut:assembling_machine",
+        `machine=${parseMachine(cmDetail)}`,
+      );
+      check(
+        "CM 配方读到了耗时（80 刻）",
+        parseDuration(cmDetail) === 80,
+        `duration=${parseDuration(cmDetail)}`,
+      );
+      check(
+        "CM 配方读到了产出（3 个效能升级插件）",
+        /- 3 × .*`kubejs:productivity_module`/.test(cmDetail),
+        cmDetail.split("\n").slice(0, 12).join(" / "),
+      );
+      // 反向断言：锡制机械硬盘是工具耐久，不是原料。被当原料算的话，
+      // 每 80 tick 就会「消耗」一张硬盘，原料表直接错。
+      const cmInputs = cmDetail.split("输出：")[0] ?? "";
+      check(
+        "CM 的耐久 requirement 没有被当成原料（输入里不应出现锡制机械硬盘）",
+        !cmInputs.includes("tin_hard_disk"),
+        cmInputs.slice(0, 500),
+      );
+    }
+  }
+
   // ============================================================ 产线（机器数）
   //
   // 字段补上之后，这一段才真正验证到「机器数算得出来」。
