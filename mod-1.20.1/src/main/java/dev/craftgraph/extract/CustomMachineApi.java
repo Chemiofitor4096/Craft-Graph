@@ -29,7 +29,7 @@ import java.util.Optional;
  *   <li>只碰 3 个方法（{@code getMachineId} / {@code getRecipeTime} / {@code getRequirements}）</li>
  *   <li>只碰 1 个静态字段（{@code IRequirement.CODEC}）和它的 {@code encodeStart}</li>
  *   <li>其余全部是普通 Java —— requirement 的内容由 codec 编码成 JSON 后，
- *       交给 core 的 {@code CustomMachineRecipeJson} 解析，不认识任何 CM 类</li>
+ *       交给 core 的 {@code ProfileRecipeParser}（按 {@code CustomMachineProfile}）解析，不认识任何 CM 类</li>
  * </ul>
  *
  * <p>任何一步失败都只让这个适配器「不生效」（配方退回 opaque），不会带崩快照构建。

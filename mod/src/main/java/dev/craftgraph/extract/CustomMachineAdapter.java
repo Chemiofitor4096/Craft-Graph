@@ -1,7 +1,9 @@
 package dev.craftgraph.extract;
 
 import dev.craftgraph.api.Models;
-import dev.craftgraph.extract.custommachine.CustomMachineRecipeJson;
+import dev.craftgraph.extract.custommachine.CustomMachineProfile;
+import dev.craftgraph.extract.profile.ProfileRecipeParser;
+import dev.craftgraph.extract.profile.RecipePlan;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -23,8 +25,8 @@ import java.util.WeakHashMap;
  *
  * CM 的配方对象自己不知道「输入是什么」—— 输入输出全在一串 requirement 里。
  * 这个适配器把整条配方交给 {@link CustomMachineApi} 编码成 JSON，再由 core 的
- * {@link CustomMachineRecipeJson} 解析成 {@link RawSlot} / {@link Models}。
- * 判断逻辑全在 core（可单测），这里只做「取对象、搬数据」。
+ * {@link ProfileRecipeParser} 按 {@link CustomMachineProfile#PROFILE} 解析成
+ * {@link RawSlot} / {@link Models}。判断逻辑全在 core（可单测），这里只做「取对象、搬数据」。
  *
  * <h2>为什么 complete() 很重要</h2>
  *
@@ -44,7 +46,7 @@ final class CustomMachineAdapter implements RecipeTypeAdapter<Recipe<?>> {
     private final CustomMachineApi api;
 
     /** 配方实例 → 解析结果。WeakHashMap：配方重载后旧实例可以被回收。 */
-    private final Map<Recipe<?>, CustomMachineRecipeJson.Parsed> cache = new WeakHashMap<>();
+    private final Map<Recipe<?>, RecipePlan> cache = new WeakHashMap<>();
 
     CustomMachineAdapter() {
         this.api = CustomMachineApi.load();
@@ -106,7 +108,7 @@ final class CustomMachineAdapter implements RecipeTypeAdapter<Recipe<?>> {
      */
     @Override
     public boolean declaresNoOutput(Recipe<?> recipe) {
-        CustomMachineRecipeJson.Parsed parsed = parsed(recipe);
+        RecipePlan parsed = parsed(recipe);
         return parsed.complete() && !parsed.hasOutputs();
     }
 
@@ -117,17 +119,18 @@ final class CustomMachineAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
     // ---------------------------------------------------------------- 内部
 
-    private CustomMachineRecipeJson.Parsed parsed(Recipe<?> recipe) {
-        CustomMachineRecipeJson.Parsed cached = cache.get(recipe);
+    private RecipePlan parsed(Recipe<?> recipe) {
+        RecipePlan cached = cache.get(recipe);
         if (cached != null) return cached;
 
-        CustomMachineRecipeJson.Parsed parsed;
+        RecipePlan parsed;
         try {
-            parsed = CustomMachineRecipeJson.parse(api.encode(recipe), this::tagMembers);
+            parsed = ProfileRecipeParser.parse(
+                    api.encode(recipe), CustomMachineProfile.PROFILE, this::tagMembers);
         } catch (Throwable t) {
             // 编码失败 / JSON 结构异常：这条配方当作「什么都没读到」，
             // 上层会标 opaque —— 不能假装它没有原料。
-            parsed = CustomMachineRecipeJson.Parsed.unreadable();
+            parsed = RecipePlan.unreadable();
         }
         cache.put(recipe, parsed);
         return parsed;

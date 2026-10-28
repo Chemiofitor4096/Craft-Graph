@@ -2,6 +2,8 @@ package dev.craftgraph.extract.custommachine;
 
 import dev.craftgraph.api.Models;
 import dev.craftgraph.extract.RawSlot;
+import dev.craftgraph.extract.profile.ProfileRecipeParser;
+import dev.craftgraph.extract.profile.RecipePlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,17 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link CustomMachineRecipeJson} 的测试。
+ * {@link ProfileRecipeParser} + {@link CustomMachineProfile#PROFILE} 的测试。
  *
  * <p>这些用例对应的是「天真实现会静默算错」的几种形状：工具被当原料、
  * 概率产出被当必然产出、不认识的 requirement 被忽略。
  */
-class CustomMachineRecipeJsonTest {
+class CustomMachineProfileTest {
 
-    private static final CustomMachineRecipeJson.TagLookup NO_TAGS = (kind, tag) -> List.of();
+    private static final ProfileRecipeParser.TagLookup NO_TAGS = (kind, tag) -> List.of();
 
-    private static CustomMachineRecipeJson.TagLookup tags(String kind, String tag, List<String> members) {
+    private static ProfileRecipeParser.TagLookup tags(String kind, String tag, List<String> members) {
         return (k, t) -> k.equals(kind) && t.equals(tag) ? members : List.of();
+    }
+
+    private static RecipePlan parse(String json, ProfileRecipeParser.TagLookup tags) {
+        return ProfileRecipeParser.parse(json, CustomMachineProfile.PROFILE, tags);
     }
 
     private static String recipe(String requirementsJson) {
@@ -39,7 +45,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void readsMachineAndDuration() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"kubejs:speed_module","amount":3}
                         """), NO_TAGS);
@@ -51,7 +57,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void repeatsItemInputsByAmount() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"kubejs:speed_module","amount":3}
                         """), NO_TAGS);
@@ -65,7 +71,7 @@ class CustomMachineRecipeJsonTest {
     @Test
     void durabilityIsNotAnIngredient() {
         // 组装机每条配方都挂一张 1024 耐久的锡制硬盘；它是工具，不是原料。
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"kubejs:speed_module","amount":3},
                         {"type":"custommachinery:durability","mode":"input","item":"kubejs:tin_hard_disk","amount":1024}
@@ -79,7 +85,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void expandsItemTags() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"#forge:ingots/tin","amount":1}
                         """),
@@ -91,7 +97,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void unresolvedTagMarksIncomplete() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"#forge:ingots/unknown","amount":1}
                         """), NO_TAGS);
@@ -101,7 +107,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void splitsGuaranteedAndChanceOutputs() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"output","item":"kubejs:productivity_module","amount":3},
                         {"type":"custommachinery:item","mode":"output","item":"kubejs:scrap","amount":1,"chance":0.25}
@@ -116,7 +122,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void readsFluidInputsAndOutputs() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:fluid","mode":"input","fluid":"kubejs:tin","amount":1350},
                         {"type":"custommachinery:fluid","mode":"output","fluid":"kubejs:steam","amount":500}
@@ -132,7 +138,7 @@ class CustomMachineRecipeJsonTest {
     @Test
     void chanceFluidOutputIsIncomplete() {
         // 协议没有「概率流体产出」这一维，不能把它当必然产出
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:fluid","mode":"output","fluid":"kubejs:steam","amount":500,"chance":0.5}
                         """), NO_TAGS);
@@ -143,7 +149,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void unknownRequirementMarksIncomplete() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"input","item":"kubejs:a","amount":1},
                         {"type":"someaddon:magic","mode":"output","item":"kubejs:b","amount":1}
@@ -155,7 +161,7 @@ class CustomMachineRecipeJsonTest {
     @Test
     void lootTableMarksIncomplete() {
         // 产出在战利品表里，读不到 —— 不能说「这条配方不产出」
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:loot_table","mode":"output","table":"minecraft:chests/simple_dungeon"}
                         """), NO_TAGS);
@@ -168,12 +174,12 @@ class CustomMachineRecipeJsonTest {
         String json = """
                 {"machine":"dut:m","time":20,"requirements":[],"unencoded":1}
                 """;
-        assertFalse(CustomMachineRecipeJson.parse(json, NO_TAGS).complete());
+        assertFalse(parse(json, NO_TAGS).complete());
     }
 
     @Test
     void emptyRequirementsIsCompleteButProducesNothing() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe(""), NO_TAGS);
 
         assertTrue(parsed.complete());
@@ -184,12 +190,12 @@ class CustomMachineRecipeJsonTest {
     @Test
     void malformedJsonThrows() {
         assertThrows(RuntimeException.class,
-                () -> CustomMachineRecipeJson.parse("not json", NO_TAGS));
+                () -> parse("not json", NO_TAGS));
     }
 
     @Test
     void chanceZeroIsNotAnOutput() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"output","item":"kubejs:never","amount":1,"chance":0.0}
                         """), NO_TAGS);
@@ -201,7 +207,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void itemOutputKeepsCount() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 recipe("""
                         {"type":"custommachinery:item","mode":"output","item":"kubejs:productivity_module","amount":3}
                         """), NO_TAGS);
@@ -213,7 +219,7 @@ class CustomMachineRecipeJsonTest {
 
     @Test
     void missingMachineIsNull() {
-        CustomMachineRecipeJson.Parsed parsed = CustomMachineRecipeJson.parse(
+        RecipePlan parsed = parse(
                 "{\"time\":20,\"requirements\":[]}", NO_TAGS);
 
         assertNull(parsed.machine());
