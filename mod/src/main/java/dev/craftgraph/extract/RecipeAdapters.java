@@ -2,6 +2,7 @@ package dev.craftgraph.extract;
 
 import dev.craftgraph.api.Models;
 import dev.craftgraph.extract.AdapterRegistry.Candidate;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.world.item.crafting.Recipe;
 import net.neoforged.fml.ModList;
 
@@ -56,6 +57,18 @@ public final class RecipeAdapters {
     /** 适配器调用失败次数。由 ClientBridge 打进日志 —— 降级必须有声音。 */
     public static int adapterFailures() {
         return registry().failures();
+    }
+
+    /**
+     * 建一个抽取器：平台实现（本变体）+ 标签索引 + 适配器登记处。
+     *
+     * <p>判断逻辑在 core 的 {@link RecipeExtractor}，这里只做组装。
+     */
+    public static RecipeExtractor<Recipe<?>> extractor(HolderLookup.Provider registries) {
+        return new RecipeExtractor<>(
+                new VanillaRecipePlatform(registries),
+                VanillaRecipePlatform.context(registries),
+                registry());
     }
 
     public static boolean declaresNoOutput(Recipe<?> recipe) {

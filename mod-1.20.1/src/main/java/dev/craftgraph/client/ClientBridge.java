@@ -20,6 +20,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RecipesUpdatedEvent;
@@ -213,8 +214,14 @@ public final class ClientBridge {
         try {
             RegistryAccess registries = mc.getConnection().registryAccess();
 
-            RecipeExtractor extractor = RecipeExtractor.create(registries);
-            List<Models.Recipe> recipes = extractor.extractAll(manager);
+            RecipeExtractor<Recipe<?>> extractor = RecipeAdapters.extractor(registries);
+            List<Models.Recipe> recipes = new ArrayList<>();
+            for (ResourceLocation id : manager.getRecipeIds().toList()) {
+                Recipe<?> recipe = manager.byKey(id).orElse(null);
+                if (recipe == null) continue;
+                Models.Recipe extracted = extractor.extract(id.toString(), recipe);
+                if (extracted != null) recipes.add(extracted);
+            }
             Map<String, List<String>> tags = collectTags(registries);
             Map<String, List<String>> registriesById = collectRegistries(registries);
             Map<String, String> names = collectDisplayNames();
