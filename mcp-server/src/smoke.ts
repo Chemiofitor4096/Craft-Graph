@@ -181,7 +181,9 @@ try {
   const mdFull = renderTree(store, tree, "test", 64);
   const rawTableOf = (md: string): string => {
     const idx = md.indexOf("## 基础原料汇总");
-    return idx >= 0 ? md.slice(idx).split("\n\n")[1] ?? "" : "";
+    if (idx < 0) return "";
+    // 标题之后先是「按选路估算」的说明，再是表格；跳过说明，取表格那一段。
+    return md.slice(idx).split("\n\n").find((part) => part.startsWith("| 物品")) ?? "";
   };
   check(
     "裁剪版与完整版的原料表一致",
@@ -214,7 +216,7 @@ try {
     })(),
     tsv.split("\n").filter((l) => /^\d+\|/.test(l))[0] ?? "(没有数据行)",
   );
-  check("TSV 里包含基础原料段", tsv.includes("# 基础原料（全树合计）"));
+  check("TSV 里包含基础原料段", tsv.includes("# 基础原料（全树合计，按当前选路估算）"));
 
   const tsvPlan = renderPlanTsv(
     store,

@@ -214,7 +214,13 @@ export function renderTree(store: RecipeStore, result: TreeResult, targetLabel: 
   renderTreeNode(store, result.root, 0, lines);
 
   lines.push("");
-  lines.push("## 基础原料汇总");
+  // 标题与这句说明缺一不可：工具对每个物品只选一条配方，这张表是「整棵树展开后的
+  // 叶子合计」，不是「做这一个东西要准备的料」。不加说明的话，模型会把整张表当成
+  // 直接答案转述，用户会以为要准备一整套原料（实测发生过）。
+  lines.push("## 基础原料汇总（按当前选路估算）");
+  lines.push("");
+  lines.push("_整棵树展开后「没有已知配方」的叶子按物品合计；每个物品只选了一条配方，" +
+    "换配方或换标签会变。不是这个配方的直接原料。_");
   lines.push("");
   if (result.rawMaterials.length === 0) {
     lines.push("_（没有识别出基础原料）_");
@@ -730,7 +736,7 @@ export function renderTreeTsv(store: RecipeStore, result: TreeResult, targetLabe
 
   lines.push(`# 配方树 ${targetLabel}`);
   if (totalHiddenNodes(result.root) >= COLLAPSE_NOTE_THRESHOLD) {
-    lines.push(`# 结构展示到第 ${detailDepth} 层，更深的分支见「未展开分支」段；基础原料为全树合计。`);
+    lines.push(`# 结构展示到第 ${detailDepth} 层，更深的分支见「未展开分支」段；基础原料为全树合计（按当前选路估算）。`);
   }
   if (result.truncated) lines.push("# ⚠️ 全树被截断，基础原料不完整，不要直接拿去建产线。");
   lines.push(`# 列 ${TREE_TSV_COLUMNS}`);
@@ -770,7 +776,7 @@ export function renderTreeTsv(store: RecipeStore, result: TreeResult, targetLabe
     }
   }
 
-  lines.push("# 基础原料（全树合计）");
+  lines.push("# 基础原料（全树合计，按当前选路估算）");
   lines.push("# 列 item|count");
   for (const m of result.rawMaterials) lines.push(`${m.item}|${m.count}`);
 

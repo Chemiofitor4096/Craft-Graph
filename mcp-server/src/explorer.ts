@@ -544,6 +544,7 @@ export function renderTreeHtml(store: RecipeStore, result: TreeResult, targetLab
   body += legendHtml();
 
   body += `<section><h2>基础原料合计</h2>`;
+  body += `<p class="muted">按当前选路估算的整树叶子合计，不是直接原料；换配方或换标签会变。</p>`;
   if (result.rawMaterials.length === 0) {
     body += `<p class="muted">没有识别出基础原料。</p>`;
   } else {
