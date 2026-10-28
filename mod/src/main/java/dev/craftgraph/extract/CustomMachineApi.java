@@ -6,8 +6,11 @@ import com.google.gson.JsonObject;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +58,11 @@ final class CustomMachineApi {
      */
     private static final String RECIPE_REQUIREMENT_CLASS =
             "fr.frinn.custommachinery.api.requirement.RecipeRequirement";
+    /** 1.21.x 的物品/流体 requirement 是 record，字段是 {@code SizedIngredient}，没有扁平字段。 */
+    private static final String ITEM_REQUIREMENT_CLASS =
+            "fr.frinn.custommachinery.common.requirement.ItemRequirement";
+    private static final String FLUID_REQUIREMENT_CLASS =
+            "fr.frinn.custommachinery.common.requirement.FluidRequirement";
 
     private final Class<?> recipeClass;
     private final Method machineId;
@@ -66,10 +74,13 @@ final class CustomMachineApi {
     private final Class<?> recipeRequirementClass;
     private final Method requirementGetter;
     private final Method chanceGetter;
+    private final Class<?> itemRequirementClass;
+    private final Class<?> fluidRequirementClass;
 
     private CustomMachineApi(Class<?> recipeClass, Method machineId, Method recipeTime, Method requirements,
                              Object requirementCodec, Method encodeStart,
-                             Class<?> recipeRequirementClass, Method requirementGetter, Method chanceGetter) {
+                             Class<?> recipeRequirementClass, Method requirementGetter, Method chanceGetter,
+                             Class<?> itemRequirementClass, Class<?> fluidRequirementClass) {
         this.recipeClass = recipeClass;
         this.machineId = machineId;
         this.recipeTime = recipeTime;
@@ -79,6 +90,8 @@ final class CustomMachineApi {
         this.recipeRequirementClass = recipeRequirementClass;
         this.requirementGetter = requirementGetter;
         this.chanceGetter = chanceGetter;
+        this.itemRequirementClass = itemRequirementClass;
+        this.fluidRequirementClass = fluidRequirementClass;
     }
 
     /**
@@ -109,8 +122,12 @@ final class CustomMachineApi {
                 // 1.20.1 的 CM 没有这一层，正常路径
             }
 
+            Class<?> itemRequirementClass = classOrNull(ITEM_REQUIREMENT_CLASS);
+            Class<?> fluidRequirementClass = classOrNull(FLUID_REQUIREMENT_CLASS);
+
             return new CustomMachineApi(recipeClass, machineId, recipeTime, requirements, codec, encodeStart,
-                    recipeRequirementClass, requirementGetter, chanceGetter);
+                    recipeRequirementClass, requirementGetter, chanceGetter,
+                    itemRequirementClass, fluidRequirementClass);
         } catch (Throwable t) {
             // 用 Throwable：类加载失败是 Error。后果限定为「这批配方仍然读不懂」。
             LOGGER.warn("CraftGraph: Custom Machinery is installed but its recipe API could not be resolved; "
@@ -168,6 +185,14 @@ final class CustomMachineApi {
                 }
             }
 
+            // 1.21.x 的物品/流体 requirement 是 record（字段是 SizedIngredient），
+            // 它的 codec 编出来不是扁平字段；这里用类型化反射归一化成 1.20.1 的形状。
+            JsonObject typed = normalizeTyped(requirement, chance);
+            if (typed != null) {
+                array.add(typed);
+                continue;
+            }
+
             Optional<JsonElement> encoded = encodeRequirement(requirement);
             if (encoded.isEmpty()) {
                 unencoded++;
@@ -195,6 +220,86 @@ final class CustomMachineApi {
         } catch (Throwable t) {
             // 单个 requirement 编不出来：计数即可，不要让它带崩整条链
             return Optional.empty();
+        }
+    }
+
+    /**
+     * 1.21.x 的类型化归一化。
+     *
+     * <p>那边的 {@code ItemRequirement}/{@code FluidRequirement} 是 record，食材字段是
+     * {@code SizedIngredient}/{@code SizedFluidIngredient}，codec 编出来不是扁平字段。
+     * 这里直接调它们的访问器，转成 1.20.1 的 {@code item/fluid + amount + chance}，
+     * core 的 profile 解析器就完全不用知道版本差异。
+     *
+     * <p>标签身份会丢，但给的是**成员 id 数组**，core 侧 TagIndex 会反查恢复
+     * （和原版 {@code Ingredient} 走同一条路）。
+     *
+     * @return 不是物品/流体 requirement、或读取失败时返回 {@code null}，
+     *         调用方退回 codec 编码（至少 type/mode 还在，core 会判「不完整」）
+     */
+    private JsonObject normalizeTyped(Object requirement, Double chance) {
+        if (itemRequirementClass != null && itemRequirementClass.isInstance(requirement)) {
+            try {
+                Object mode = itemRequirementClass.getMethod("mode").invoke(requirement);
+                Object sized = itemRequirementClass.getMethod("ingredient").invoke(requirement);
+                Object[] stacks = (Object[]) sized.getClass().getMethod("getItems").invoke(sized);
+                int count = (Integer) sized.getClass().getMethod("count").invoke(sized);
+
+                JsonArray ids = new JsonArray();
+                for (Object stack : stacks) {
+                    ResourceLocation id = BuiltInRegistries.ITEM.getKey(((ItemStack) stack).getItem());
+                    if (id != null) ids.add(id.toString());
+                }
+                if (ids.isEmpty() || count <= 0) return null;
+
+                JsonObject json = base("custommachinery:item", mode, chance);
+                json.add("item", ids);
+                json.addProperty("amount", count);
+                return json;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+
+        if (fluidRequirementClass != null && fluidRequirementClass.isInstance(requirement)) {
+            try {
+                Object mode = fluidRequirementClass.getMethod("mode").invoke(requirement);
+                Object sized = fluidRequirementClass.getMethod("ingredient").invoke(requirement);
+                Object ingredient = sized.getClass().getMethod("ingredient").invoke(sized);
+                Object[] stacks = (Object[]) ingredient.getClass().getMethod("getStacks").invoke(ingredient);
+                int amount = (Integer) sized.getClass().getMethod("amount").invoke(sized);
+
+                JsonArray ids = new JsonArray();
+                for (Object stack : stacks) {
+                    ResourceLocation id = BuiltInRegistries.FLUID.getKey(((FluidStack) stack).getFluid());
+                    if (id != null) ids.add(id.toString());
+                }
+                if (ids.isEmpty() || amount <= 0) return null;
+
+                JsonObject json = base("custommachinery:fluid", mode, chance);
+                json.add("fluid", ids);
+                json.addProperty("amount", amount);
+                return json;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static JsonObject base(String type, Object mode, Double chance) {
+        JsonObject json = new JsonObject();
+        json.addProperty("type", type);
+        json.addProperty("mode", String.valueOf(mode));
+        if (chance != null && chance < 1.0D) json.addProperty("chance", chance);
+        return json;
+    }
+
+    private static Class<?> classOrNull(String name) {
+        try {
+            return Class.forName(name);
+        } catch (Throwable t) {
+            return null;
         }
     }
 }

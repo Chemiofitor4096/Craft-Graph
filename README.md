@@ -213,6 +213,22 @@ dependencies {
 
 浏览已发布的版本：<https://maven.kessokuteatime.work/#/releases/dev/craftgraph/craftgraph>
 
+## 扩展：给新模组加 profile
+
+有些模组的配方能用它自己的 codec 编码成 JSON（Custom Machinery 是第一个）。这类配方
+**不用写 Java**——加一份 profile 就能读：
+
+- 内置：`dev/craftgraph/profiles/`（随 jar 发布）
+- 覆盖/新增：`~/.craftgraph/profiles/*.json`，同 `typeId` 时用户版本优先
+
+profile 描述四件事：机器 / 耗时 / requirement 列表的字段名，requirement 的类型与
+input/output 字段，以及每种 requirement 算「原料 / 工具 / 条件 / 读不懂」。
+
+写错不会静默：单份解析失败会带文件名和原因打日志并跳过；缺字段、未知角色直接报错。
+内置的 CM profile 在
+[`custommachinery.custom_machine.json`](core/src/main/resources/dev/craftgraph/profiles/custommachinery.custom_machine.json)，
+可以照着写。
+
 ## 它是怎么工作的
 
 ```text

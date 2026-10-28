@@ -84,15 +84,11 @@ public final class ProfileRecipeParser {
 
     private static void readItem(JsonObject requirement, boolean output, RecipeProfile profile,
                                  TagLookup tags, Builder b) {
-        String raw = optString(requirement, profile.itemField());
+        JsonElement raw = requirement.get(profile.itemField());
         int amount = optInt(requirement, profile.countField(), 1);
         double chance = optDouble(requirement, profile.chanceField(), 1.0D);
-        if (raw == null || amount <= 0) {
-            b.complete = false;
-            return;
-        }
         List<String> ids = resolve(raw, "item", tags);
-        if (ids.isEmpty()) {
+        if (ids.isEmpty() || amount <= 0) {
             b.complete = false;
             return;
         }
@@ -105,8 +101,8 @@ public final class ProfileRecipeParser {
             return;
         }
 
-        if (raw.startsWith("#")) {
-            // 产出不允许是标签（模组自己也会拒绝这种数据）
+        if (isTag(raw) || ids.size() > 1) {
+            // 产出必须是单一具体物品；标签/「多选一」都无法如实表达
             b.complete = false;
             return;
         }
@@ -121,15 +117,11 @@ public final class ProfileRecipeParser {
 
     private static void readFluid(JsonObject requirement, boolean output, RecipeProfile profile,
                                   TagLookup tags, Builder b) {
-        String raw = optString(requirement, profile.fluidField());
+        JsonElement raw = requirement.get(profile.fluidField());
         long amount = optLong(requirement, profile.countField(), 1L);
         double chance = optDouble(requirement, profile.chanceField(), 1.0D);
-        if (raw == null || amount <= 0 || amount > Integer.MAX_VALUE) {
-            b.complete = false;
-            return;
-        }
         List<String> ids = resolve(raw, "fluid", tags);
-        if (ids.isEmpty()) {
+        if (ids.isEmpty() || amount <= 0 || amount > Integer.MAX_VALUE) {
             b.complete = false;
             return;
         }
@@ -139,7 +131,7 @@ public final class ProfileRecipeParser {
             return;
         }
 
-        if (raw.startsWith("#")) {
+        if (isTag(raw) || ids.size() > 1) {
             b.complete = false;
             return;
         }
@@ -151,12 +143,34 @@ public final class ProfileRecipeParser {
         b.fluidResults.add(new Models.FluidStack(ids.get(0), (int) amount));
     }
 
-    /** 标签展开成成员 id；具体 id 原样返回。 */
-    private static List<String> resolve(String raw, String kind, TagLookup tags) {
+    /**
+     * 展开 id 字段：单字符串、{@code #tag}，或字符串数组都接受。
+     *
+     * <p>数组是给 1.21.x 的形态用的：那边的 {@code SizedIngredient} 只给得出「一堆具体物品」，
+     * 标签身份由 TagIndex 反查恢复（和原版 {@code Ingredient} 走同一条路）。
+     */
+    private static List<String> resolve(JsonElement element, String kind, TagLookup tags) {
+        if (element == null || element.isJsonNull()) return List.of();
+        if (element.isJsonPrimitive()) return resolveOne(element.getAsString(), kind, tags);
+        if (element.isJsonArray()) {
+            List<String> out = new ArrayList<>();
+            for (JsonElement item : element.getAsJsonArray()) {
+                if (item.isJsonPrimitive()) out.addAll(resolveOne(item.getAsString(), kind, tags));
+            }
+            return out;
+        }
+        return List.of();
+    }
+
+    private static List<String> resolveOne(String raw, String kind, TagLookup tags) {
         if (!raw.startsWith("#")) return List.of(raw);
         String tagId = raw.substring(1);
         if (tagId.isEmpty()) return List.of();
         return tags.members(kind, tagId);
+    }
+
+    private static boolean isTag(JsonElement element) {
+        return element != null && element.isJsonPrimitive() && element.getAsString().startsWith("#");
     }
 
     // ---------------------------------------------------------------- JSON 小工具

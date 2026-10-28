@@ -102,6 +102,29 @@ class CustomMachineProfileTest {
     }
 
     @Test
+    void acceptsIdArraysFrom121SizedIngredients() {
+        // 1.21 的 SizedIngredient 只能给出一包具体物品（标签已展开），用数组表达
+        RecipePlan parsed = parse(recipe("""
+                {"type":"custommachinery:item","mode":"input","item":["minecraft:iron_ingot","minecraft:copper_ingot"],"amount":2}
+                """), NO_TAGS);
+
+        assertTrue(parsed.complete());
+        assertEquals(2, parsed.itemInputs().size());
+        assertEquals(List.of("minecraft:iron_ingot", "minecraft:copper_ingot"),
+                parsed.itemInputs().get(0).ids());
+    }
+
+    @Test
+    void outputWithMultipleIdsIsIncomplete() {
+        // 产出必须能落成单一具体物品，数组/标签都表达不了
+        RecipePlan parsed = parse(recipe("""
+                {"type":"custommachinery:item","mode":"output","item":["a:b","c:d"],"amount":1}
+                """), NO_TAGS);
+
+        assertFalse(parsed.complete());
+    }
+
+    @Test
     void expandsItemTags() {
         RecipePlan parsed = parse(
                 recipe("""
