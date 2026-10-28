@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 字段名差一个字母、{@code null} 处理不一致、数组和对象搞混，
  * 这些都要等到用户进游戏、同时调两个系统时才会暴露，而且很难定位。
  *
- * 这个测试把 Java 侧**真实的 HTTP 响应体**写到 {@code shared/fixtures/bridge-dump/}，
- * 由 TypeScript 侧的 {@code npm run contract} 读进来，喂给它整个索引和处理链路。
+ * 这个测试把 Java 侧**真实的 HTTP 响应体**写到 {@code protocol/fixtures/bridge-dump/}，
+ * 由 MCP 仓库（Craft-Graph-MCP）的 {@code npm run contract} 读进来，喂给它整个索引和处理链路。
  * 这样契约就被真正验证了：不是「两边都照着文档写」，而是「一边的输出确实能被另一边吃下去」。
  *
  * <h2>它同时是「金标准样本」</h2>
@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ContractDumpTest {
 
-    private static final Path OUT_DIR = Path.of("..", "shared", "fixtures", "bridge-dump");
+    private static final Path OUT_DIR = Path.of("..", "protocol", "fixtures", "bridge-dump");
 
     // ---------------------------------------------------------------- 样本数据
     //

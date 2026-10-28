@@ -404,7 +404,7 @@ ModLoadingException: Mod File ... needs language provider javafml:47.2.0 or abov
    在真实数据上的影响 —— 1.21.1 那边也没复核过，一次 `live` 两边都覆盖。
 
 跑法：在 1.20.1 + Forge 47.2.0+ 的实例里装上 `craftgraph-<版本>-mc1.20.1.jar`，
-进世界，然后 `cd mcp-server && npm run live`。
+进世界，然后在 MCP 仓库跑 `npm run live`。
 
 ### live 层这次补了什么（原来没有，而我一度以为有）
 

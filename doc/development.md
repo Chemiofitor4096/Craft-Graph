@@ -20,11 +20,11 @@
 | `doc/decisions.md` | 已锁定的技术决策及其代价 |
 | `doc/format-evaluation.md` | 输出格式的实测评估（含对紧凑 DSL 方案的评估） |
 | `doc/porting-1.20.1.md` | 1.20.1 版本的调查结论、已核实的 API 差异与两个版本的差异清单 |
-| `mcp-server/` | TypeScript MCP 服务器：工具定义、配方树、产线计算 |
+| `Craft-Graph-MCP/` | 另一个仓库：TypeScript MCP 服务器（工具定义、配方树、产线计算） |
 | `mod/` | 1.21.1（NeoForge）桥接 Mod：读配方、建索引、暴露本地 HTTP |
 | `mod-1.20.1/` | 1.20.1（MinecraftForge 47.2.0+）版本变体，共享 `core/` |
 | `core/` | **不含 Minecraft** 的那一半：算法、协议 DTO、快照、本地 HTTP 服务 |
-| `shared/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Java 测试生成（不提交） |
+| `protocol/fixtures/` | 测试夹具。`tiny-pack.json` 手写；`bridge-dump/` 由 Java 测试生成（不提交） |
 
 `mod/` 自带 `gradlew`，可以单独当 Gradle 项目打开。它把 `../core` 当作子工程 include 进来
 （`settings.gradle`），所以从 `mod/` 执行 `./gradlew build` 会连 `core` 一起构建和测试 ——
@@ -44,15 +44,15 @@
 | Gradle | 不需要安装 | `mod/gradlew` 已生成 |
 
 ```bash
-cd mcp-server && npm install
+cd ../Craft-Graph-MCP && npm install
 cd ../mod && ./gradlew build
 ```
 
 ## 测试：四层验证
 
 ```bash
-# MCP Server（TypeScript）
-cd mcp-server
+# MCP Server（TypeScript），在另一个仓库
+cd ../Craft-Graph-MCP
 npm run typecheck    # 类型检查
 npm run smoke        # 算法层：索引、标签挑选、合并槽位、循环检测、离线降级
 npm run e2e          # 协议层：真实 stdio 握手 + 工具调用
@@ -102,7 +102,7 @@ cd ../mod-1.20.1       # 1.20.1 / MinecraftForge —— 独立的构建，需要
 
 ```bash
 cd mod && ./gradlew test        # 先：生成契约样本
-cd ../mcp-server && npm run contract
+cd ../Craft-Graph-MCP && npm run contract
 ```
 
 样本本身**不提交**（是生成物）。`contract.ts` 会检查样本是否比 Java 源码旧，
@@ -123,7 +123,7 @@ cd ../mcp-server && npm run contract
 
 做法：
 
-1. `ContractDumpTest` 把 Java 侧**真实的 HTTP 响应体**写到 `shared/fixtures/bridge-dump/`，
+1. `ContractDumpTest` 把 Java 侧**真实的 HTTP 响应体**写到 `protocol/fixtures/bridge-dump/`，
    覆盖易错形态：`null` 字段、概率产出、opaque 配方、流体、中文显示名
 2. `npm run contract` 用这些样本回放出一个 Bridge，让整条链路
    （HTTP 客户端 → 索引 → 配方树 → 产线 → 报告）跑在**真实字节**上，
@@ -150,7 +150,7 @@ JIT 还没热。所以别把单个数字当性能指标看，当 30~55ms 这个�
 （1 原木 → 4 木板 → 4 木棍 → 4 火把）。
 
 修法是在**递归前按物品合并槽位**，不是事后去重 —— 合并后只取整一次，数量才准。
-见 `mcp-server/src/resolution.ts` 的 `mergeInputs`。
+见 MCP 仓库 `src/resolution.ts` 的 `mergeInputs`。
 
 ### 二、标签成员挑选反直觉
 

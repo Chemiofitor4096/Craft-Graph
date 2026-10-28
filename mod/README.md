@@ -98,7 +98,7 @@
 
 ```bash
 cd mod && ./gradlew test        # Java 侧 127 用例
-cd ../mcp-server && npm run contract   # 跨语言契约 17 项
+cd ../Craft-Graph-MCP && npm run contract   # 跨语言契约 17 项
 ```
 
 ### 跨语言契约验证怎么做的
@@ -109,7 +109,7 @@ cd ../mcp-server && npm run contract   # 跨语言契约 17 项
 
 做法：
 
-1. `ContractDumpTest` 把 Java 侧**真实的 HTTP 响应体**写到 `shared/fixtures/bridge-dump/`，
+1. `ContractDumpTest` 把 Java 侧**真实的 HTTP 响应体**写到 `protocol/fixtures/bridge-dump/`，
    覆盖易错形态：`null` 字段、概率产出、opaque 配方、流体、中文显示名
 2. TypeScript 侧的 `npm run contract` 用这些样本回放出一个 Bridge，
    让整套索引和处理链路跑在**真实字节**上，并断言两侧对同一份数据得出一致的结论

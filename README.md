@@ -76,7 +76,7 @@ AI 查的是你**当前实际加载的整合包**的实时配方数据。
 
 ## 安装
 
-两半，**两个都要装** —— 只放 jar 是问不出任何东西的，配方树和产线计算全在 Server 侧。
+两半，**两个仓库都要装** —— 只放 jar 是问不出任何东西的，配方树和产线计算全在 MCP 侧。
 
 **1. Mod** —— 从 [Releases 页面](https://github.com/Chemiofitor4096/Craft-Graph/releases)
 下载对应你游戏版本的那个放进 mods 目录：
@@ -95,24 +95,14 @@ cd Craft-Graph/mod-1.20.1 && ./gradlew build   # 1.20.1（需要 JDK 17）
 # → mod/build/libs/craftgraph-*.jar  /  mod-1.20.1/build/libs/craftgraph-*-mc1.20.1.jar
 ```
 
-**2. MCP Server** —— 还没发布到 npm，从源码构建：
+**2. MCP Server** —— 在另一个仓库：[Craft-Graph-MCP](https://github.com/Chemiofitor4096/Craft-Graph-MCP)。
 
 ```bash
-cd Craft-Graph/mcp-server && npm install && npm run build
+git clone https://github.com/Chemiofitor4096/Craft-Graph-MCP.git
+cd Craft-Graph-MCP && npm ci && npm run build
 ```
 
-然后把 AI 客户端指向 `mcp-server/dist/index.js`。以 Claude Code 为例：
-
-```jsonc
-{
-  "mcpServers": {
-    "craftgraph": {
-      "command": "node",
-      "args": ["/Craft-Graph 的绝对路径/mcp-server/dist/index.js"]
-    }
-  }
-}
-```
+然后把 AI 客户端指向 `dist/index.js`（完整配置示例见那个仓库的 README）。
 
 **不需要配置端口或 token。** Mod 启动时会写 `~/.craftgraph/bridge.json`，
 MCP Server 自己去那里找。原版启动器和第三方启动器的位置都会写一份，所以自定义游戏目录也能用。
@@ -160,7 +150,7 @@ MCP Server 自己去那里找。原版启动器和第三方启动器的位置都
 ### 不用 AI 客户端：命令行
 
 ```bash
-cd mcp-server
+cd Craft-Graph-MCP
 npm run plan -- --item create:brass_ingot --rate 100           # 产线规划（markdown 打到终端）
 npm run plan -- --item create:brass_ingot --rate 100 --html    # 同样的内容生成网页
 npm run plan -- --item minecraft:iron_pickaxe --count 1 --tree # 配方树
@@ -181,20 +171,20 @@ MCP Server 会退回磁盘上的上次快照（`~/.craftgraph/cache/`），查�
 |---|---|
 | AI 说连不上游戏 | 游戏是否已进入存档；`~/.craftgraph/bridge.json` 是否存在；让 AI 调 `get_bridge_status` 看输出 |
 | 查什么都说没有 | 游戏可能还在加载（状态是 `ready: false`），进世界后重试 —— 不是坏了 |
-| 大量配方「读不懂」 | 跑 `npm run inspect`，按配方类型列出读不懂的数量和原因 |
+| 大量配方「读不懂」 | 在 MCP 仓库跑 `npm run inspect`，按配方类型列出读不懂的数量和原因 |
 | 怀疑数据太旧 | 让 AI 调 `refresh_recipes`，或对比 `get_bridge_status` 里的 dataVersion 有没有变 |
 
 ## 给 AI 客户端装这个 skill（可选，但推荐）
 
-`skill/craftgraph/SKILL.md` 是给 AI 客户端用的 skill：它把这套工具期望的工作流写清楚了 ——
+skill 在 MCP 仓库的 `skill/craftgraph/SKILL.md`：它把这套工具期望的工作流写清楚了 ——
 **先确认产量再规划**、怎么读「深度 / opaque / 截断」、缺口怎么如实转达，
 以及最容易出错的那条：**不要手工重算工具已经算过的东西**。
 
-安装就是把目录复制进客户端的 skills 目录：
+安装：
 
 ```bash
-cp -r skill/craftgraph ~/.claude/skills/     # Claude Code
-cp -r skill/craftgraph ~/.zcode/skills/      # ZCode
+cp -r Craft-Graph-MCP/skill/craftgraph ~/.claude/skills/     # Claude Code
+cp -r Craft-Graph-MCP/skill/craftgraph ~/.zcode/skills/      # ZCode
 ```
 
 不装也能用，但模型倾向于自己重算一遍速率，并把「这份规划算不出什么」散落在正文各处。
@@ -255,7 +245,7 @@ Minecraft 1.21.1 + 你的整合包
 | [`doc/protocol.md`](doc/protocol.md) | Bridge HTTP 契约 —— 两侧唯一的约定 |
 | [`doc/decisions.md`](doc/decisions.md) | 已锁定的技术决策，以及改动它们要付什么代价 |
 | [`doc/development.md`](doc/development.md) | 开发环境、四层测试、token 测量、踩过的坑 |
-| [`doc/format-evaluation.md`](doc/format-evaluation.md) | 输出格式的实测评估，含对紧凑 DSL 方案的评估 |
+| [Craft-Graph-MCP](https://github.com/Chemiofitor4096/Craft-Graph-MCP) | MCP 服务器（TypeScript）：配方树、产线计算、缓存、MCP 工具 |
 
 ## 当前状态
 
@@ -265,7 +255,7 @@ Minecraft 1.21.1 + 你的整合包
 | | |
 |---|---|
 | 桥接 Mod | 可用。168 个 JUnit 用例，都不需要启动 Minecraft |
-| MCP Server | 可用。74 项算法冒烟检查、MCP 协议测试、跨语言契约测试 |
+| MCP Server | 在 [Craft-Graph-MCP](https://github.com/Chemiofitor4096/Craft-Graph-MCP)：74 项算法冒烟检查、MCP 协议测试、跨语言契约测试 |
 | 配方覆盖 | 所有配方类型都会被读到。原版存在的 7 种类型里有 5 种 100% 可读 |
 | 机器与耗时数据 | 每条配方都有机器；112 条熔炼类配方有耗时。能耗原版根本没有这个数据，**宁可为 null 也不编** |
 | 锻造配方 | 靠访问转换器读出，做法与 JEI 相同。下界合金升级完全可读；盔甲纹饰读到了它诚实的上限 |

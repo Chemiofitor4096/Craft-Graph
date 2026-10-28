@@ -8,7 +8,7 @@
 | 文档 | 什么时候必须读 |
 |---|---|
 | [`doc/protocol.md`](doc/protocol.md) | 碰任何字段、端点、错误码之前。**它是两侧唯一的契约**，改字段名/语义 = 破坏性变更，必须同步升 `protocolVersion` |
-| [`doc/development.md`](doc/development.md) | 动手之前。四层测试怎么分工、token 怎么量、以及六条踩过的坑（**最省时间的一份**） |
+| [`doc/development.md`](doc/development.md) | 动手之前。Java 三层测试怎么分工、以及六条踩过的坑（**最省时间的一份**） |
 | [`doc/decisions.md`](doc/decisions.md) | 想改「已锁定的决策」之前，先看那一栏的代价 |
 | [`mod/README.md`](mod/README.md) | 改 Mod 之前（快照架构、线程规则） |
 
@@ -16,7 +16,7 @@
 
 ## 项目形状
 
-四块，**职责不能混**：
+三块，**职责不能混**：
 
 - `mod/`（Java / NeoForge）—— 1.21.1 的壳：读游戏里的配方，归一化成 DTO，用本地 HTTP 发出去。
   **它跑在脆弱的环境里，越薄越好**；任何图算法放进去都没法脱离游戏测试，游戏一崩还连带挂掉。
@@ -28,8 +28,10 @@
   在 `mod/` 里 `import net.minecraft.*` 会编译过、测试也过，在 `core/` 里立刻编译失败。
   两个 mod 工程都用 `srcDir` 把这批源码编进自己的 jar，所以运行时是一个包。
   见 `core/build.gradle` 顶部；它以 **Java 17** 为目标（较低的那个版本决定下限）。
-- `mcp-server/`（TypeScript）—— 配方树、产线计算、缓存、MCP 工具。**算法全在这里**，
-  所以能用 `shared/fixtures/` 的假数据完整测试，不需要启动游戏。
+
+消费端（配方树、产线计算、MCP 工具）不在这个仓库：
+[Craft-Graph-MCP](https://github.com/Chemiofitor4096/Craft-Graph-MCP)。两边只通过
+`doc/protocol.md` 通信，协议样本在 `protocol/fixtures/`（由 `ContractDumpTest` 生成）。
 
 **判断一段新代码该放哪**：会 `import net.minecraft.*` 吗 → 放 `mod/`（并在 `mod-1.20.1/` 写对应的一份）；
 不会 → 放 `core/`。适配器里那些「判断」尤其要往 `core/` 挤 ——
@@ -89,16 +91,8 @@ AI 会据此编出错误答案而且不自知。同理：
 ## 测试与验证
 
 ```bash
-# TypeScript（不需要游戏）
-cd mcp-server
-npm run typecheck    # 类型检查
-npm run smoke        # 算法层：索引、标签挑选、槽位合并、循环检测、离线降级
-npm run e2e          # 协议层：真实 stdio 握手 + 工具调用
-npm run contract     # 跨语言契约：吃 Java 侧真实输出（**依赖下面 mod 的 test 先跑**）
-npm run measure      # token 测量；改了输出/渲染就跑一遍
-npm run live         # ★ 对运行中的真游戏体检（需 Minecraft 已进世界）
-npm run inspect      # 配方覆盖度诊断：哪些类型读不懂、为什么
-npm run routes       # 选路质量诊断：叶子原料与整合度分布（**改选路启发式之前先跑它**）
+# MCP 侧的 typecheck / smoke / e2e / contract / measure / live 在另一个仓库：
+# https://github.com/Chemiofitor4096/Craft-Graph-MCP
 
 # Java（不需要启动 Minecraft）
 cd mod
@@ -117,7 +111,7 @@ cd ../mod-1.20.1     # 1.20.1 那个版本变体，需要 JDK 17
 `ContractDumpTest` 没跑、样本不会刷新，而 `contract` 会报「样本过期」。
 需要真跑时用 `./gradlew test --rerun-tasks --no-build-cache`。
 
-这个陷阱**在 CI 上更隐蔽**：只改 TypeScript 的提交不会让 `:test` 的输入变化，
+这个陷阱**在 CI 上更隐蔽**：只改文档或脚本的提交不会让 `:test` 的输入变化，
 于是 `./gradlew build` 直接 FROM-CACHE，契约样本从未生成，
 红的是 `ci.yml` 里那步 upload（`no files found`）—— 看起来像上传坏了，其实根因是缓存。
 所以 CI 里紧跟 `build` 有一道无条件的 `./gradlew test --rerun --no-build-cache`。
@@ -129,16 +123,16 @@ cd ../mod-1.20.1     # 1.20.1 那个版本变体，需要 JDK 17
 | 东西 | 需要什么 |
 |---|---|
 | `instanceof` 对 MC / 模组类的派发 | **装了对应模组的真游戏**（测试类路径看不到它们） |
-| 字段在真数据里有没有值 | `npm run live` |
-| 大包上的 opaque 比例 / 抽取耗时 | 用户自己的包（`npm run inspect` + 游戏日志里那行「主线程抽取 N ms」） |
-| 选路/解析改动的效果 | **离线**对比：真实包的快照若在 `~/.craftgraph/cache/`，起个临时脚本走 `RecipeStore.load` 就能在**用户真实数据**上跑前后对比，不需要游戏在运行 |
+| 字段在真数据里有没有值 | MCP 仓库的 `npm run live` |
+| 大包上的 opaque 比例 / 抽取耗时 | 用户自己的包（MCP 仓库的 `npm run inspect` + 游戏日志里那行「主线程抽取 N ms」） |
+| 选路/解析改动的效果 | **离线**对比：真实包的快照若在 `~/.craftgraph/cache/`，在 MCP 仓库起个临时脚本走 `RecipeStore.load` 就能在**用户真实数据**上跑前后对比，不需要游戏在运行 |
 | 1.20.1 那一侧能不能真跑 | **装了 1.20.1 Forge 的实例**。编译通过只证明 API 对得上，证明不了 AT 在运行时生效、也证明不了事件触发时机 —— 见下面那段 |
 | 构造期 / API 存不存在 | 用官方映射查（见 `doc/porting-1.20.1.md` 的方法），**别用 `grep … \| head`**：截断过一次，于是得出「这个方法不存在」的错误结论，还照着它设计了一版方案 |
 
 **改启发式之前先量，而且要量「全部」不能只看一两个案例**：这个项目里有两条候选规则
 （「偏好标签输入」「偏好被很多配方消耗的批量物品」）都是先想出来、再拿真实包量、结果被数据推翻的。
 反面教材也在里面：有一条改动在真实包上改变了 **39% 的首选**，而提交前只对了一个案例 ——
-所以 `npm run routes` 就是为这件事存在的（见 `doc/development.md`）。
+所以 MCP 仓库的 `npm run routes` 就是为这件事存在的（见 `doc/development.md`）。
 
 另外：**别指望给「路线合不合理」找一条纯数据判据**。实测 `minecraft:iron_ore` 与
 `minecraft:iron_horse_armor` 在标签数（5 vs 1）和整合度（3 vs 3）上几乎一样 ——
@@ -151,7 +145,7 @@ cd ../mod-1.20.1     # 1.20.1 那个版本变体，需要 JDK 17
 
 ## 改东西时的检查清单
 
-- **改了输出 / 渲染** → `npm run measure`，看 token 涨没涨（输出进模型上下文，大小就是成本）
+- **改了输出 / 渲染** → MCP 仓库的 `npm run measure`，看 token 涨没涨（输出进模型上下文，大小就是成本）
 - **改了 Mod 的字段读取** → 加 `live` 断言（见硬规则 2）
 - **加了模组适配器** → **必须惰性注册**：`CreateAdapter` 直接引用 Create 的类，
   放进静态列表会让没装该模组的实例在**构建快照时** `NoClassDefFoundError`，整个桥接不可用。
@@ -176,6 +170,6 @@ cd ../mod-1.20.1     # 1.20.1 那个版本变体，需要 JDK 17
 
 ## 版本号
 
-`mod/gradle.properties` 的 `mod_version`、`mcp-server/package.json`、`mcp-server/src/index.ts` 的
-`VERSION` **保持一致** —— 它们是一个产品的两半，分开走只会让人对着两个数字猜哪个是新的。
+`mod/gradle.properties` 的 `mod_version` 是这个仓库唯一的版本号；MCP 仓库有自己的 semver。
+两边的兼容判据是 `protocolVersion`（见 `doc/protocol.md`），**不是版本号相等**。
 Release workflow 会校验 `tag` 与 `mod_version` 一致（`v0.2.0` ↔ `0.2.0`），不一致直接失败。
