@@ -102,6 +102,8 @@ legacyForge {
 // 共享核心（不含 Minecraft 的那一半）。与 mod/ 用的是同一批文件，
 // 用 srcDir 编进这个工程自己的 jar，理由见 core/build.gradle 顶部。
 sourceSets.main.java.srcDir '../core/src/main/java'
+// profile 等数据资源也住在 core 里；不加这一行，jar 里就没有 recipe profile。
+sourceSets.main.resources.srcDir '../core/src/main/resources'
 
 // core 是 include 进来的子工程，默认会把产物写进 core/build/ —— 而 1.21.1 那个构建
 // 也把同一个目录当自己的输出目录（两个构建 include 的是同一个 projectDir）。

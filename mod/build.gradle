@@ -125,6 +125,8 @@ neoForge.ideSyncTask generateModMetadata
 // 在 mod 工程里 MC 就在类路径上，`import net.minecraft.*` 会编译过、测试也过，
 // 那份独立的构建会让它立刻编译失败。见 core/build.gradle 顶部。
 sourceSets.main.java.srcDir '../core/src/main/java'
+// profile 等数据资源也住在 core 里；不加这一行，jar 里就没有 recipe profile。
+sourceSets.main.resources.srcDir '../core/src/main/resources'
 
 // 把 core 这个子工程的产物收进本构建自己的 build/ 下。
 //

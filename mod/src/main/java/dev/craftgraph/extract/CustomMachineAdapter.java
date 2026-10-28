@@ -1,9 +1,10 @@
 package dev.craftgraph.extract;
 
 import dev.craftgraph.api.Models;
-import dev.craftgraph.extract.custommachine.CustomMachineProfile;
 import dev.craftgraph.extract.profile.ProfileRecipeParser;
+import dev.craftgraph.extract.profile.Profiles;
 import dev.craftgraph.extract.profile.RecipePlan;
+import dev.craftgraph.extract.profile.RecipeProfile;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -12,6 +13,8 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.material.Fluid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +28,7 @@ import java.util.WeakHashMap;
  *
  * CM 的配方对象自己不知道「输入是什么」—— 输入输出全在一串 requirement 里。
  * 这个适配器把整条配方交给 {@link CustomMachineApi} 编码成 JSON，再由 core 的
- * {@link ProfileRecipeParser} 按 {@link CustomMachineProfile#PROFILE} 解析成
+ * {@link ProfileRecipeParser} 按 {@link Profiles#forType} 取到的 profile 解析成
  * {@link RawSlot} / {@link Models}。判断逻辑全在 core（可单测），这里只做「取对象、搬数据」。
  *
  * <h2>为什么 complete() 很重要</h2>
@@ -43,18 +46,28 @@ import java.util.WeakHashMap;
  */
 final class CustomMachineAdapter implements RecipeTypeAdapter<Recipe<?>> {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("craftgraph-custommachinery");
+
     private final CustomMachineApi api;
+
+    /** profile 来自 core 资源或用户覆盖目录；缺失时适配器不生效（配方保持 opaque）。 */
+    private final RecipeProfile profile;
 
     /** 配方实例 → 解析结果。WeakHashMap：配方重载后旧实例可以被回收。 */
     private final Map<Recipe<?>, RecipePlan> cache = new WeakHashMap<>();
 
     CustomMachineAdapter() {
         this.api = CustomMachineApi.load();
+        this.profile = Profiles.forType("custommachinery:custom_machine");
+        if (profile == null) {
+            LOGGER.warn("CraftGraph: no recipe profile for custommachinery:custom_machine; "
+                    + "its recipes stay unreadable. Check custommachinery.custom_machine.json.");
+        }
     }
 
     @Override
     public boolean handles(Recipe<?> recipe) {
-        return api != null && api.handles(recipe);
+        return profile != null && api != null && api.handles(recipe);
     }
 
     @Override
@@ -126,7 +139,7 @@ final class CustomMachineAdapter implements RecipeTypeAdapter<Recipe<?>> {
         RecipePlan parsed;
         try {
             parsed = ProfileRecipeParser.parse(
-                    api.encode(recipe), CustomMachineProfile.PROFILE, this::tagMembers);
+                    api.encode(recipe), profile, this::tagMembers);
         } catch (Throwable t) {
             // 编码失败 / JSON 结构异常：这条配方当作「什么都没读到」，
             // 上层会标 opaque —— 不能假装它没有原料。

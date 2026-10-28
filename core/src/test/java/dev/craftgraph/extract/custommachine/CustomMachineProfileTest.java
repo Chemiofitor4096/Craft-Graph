@@ -3,24 +3,31 @@ package dev.craftgraph.extract.custommachine;
 import dev.craftgraph.api.Models;
 import dev.craftgraph.extract.RawSlot;
 import dev.craftgraph.extract.profile.ProfileRecipeParser;
+import dev.craftgraph.extract.profile.Profiles;
 import dev.craftgraph.extract.profile.RecipePlan;
+import dev.craftgraph.extract.profile.RecipeProfile;
+import dev.craftgraph.extract.profile.RequirementRole;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link ProfileRecipeParser} + {@link CustomMachineProfile#PROFILE} 的测试。
+ * {@link ProfileRecipeParser} + 内置 CM profile 的测试。
  *
- * <p>这些用例对应的是「天真实现会静默算错」的几种形状：工具被当原料、
- * 概率产出被当必然产出、不认识的 requirement 被忽略。
+ * <p>profile 现在从 core 资源加载（{@code dev/craftgraph/profiles/}），所以这组用例
+ * 同时守着「资源文件还在、字段名没被改坏」。
  */
 class CustomMachineProfileTest {
+
+    /** 从 jar 内资源加载 —— 如果 profile 文件丢了或写坏了，这里会直接 NPE/失败。 */
+    private static final RecipeProfile PROFILE = Profiles.forType("custommachinery:custom_machine");
 
     private static final ProfileRecipeParser.TagLookup NO_TAGS = (kind, tag) -> List.of();
 
@@ -29,7 +36,18 @@ class CustomMachineProfileTest {
     }
 
     private static RecipePlan parse(String json, ProfileRecipeParser.TagLookup tags) {
-        return ProfileRecipeParser.parse(json, CustomMachineProfile.PROFILE, tags);
+        return ProfileRecipeParser.parse(json, PROFILE, tags);
+    }
+
+    @Test
+    void shippedProfileIsLoaded() {
+        assertNotNull(PROFILE, "内置 custommachinery profile 必须能从资源加载");
+        assertEquals("custommachinery:custom_machine", PROFILE.typeId());
+        assertEquals("machine", PROFILE.machineField());
+        assertEquals(RequirementRole.TOOL, PROFILE.roleOf("custommachinery:durability"));
+        assertEquals(RequirementRole.INCOMPLETE, PROFILE.roleOf("custommachinery:loot_table"));
+        // 没写进 profile 的类型按「读不全」处理
+        assertEquals(RequirementRole.INCOMPLETE, PROFILE.roleOf("someaddon:magic"));
     }
 
     private static String recipe(String requirementsJson) {
