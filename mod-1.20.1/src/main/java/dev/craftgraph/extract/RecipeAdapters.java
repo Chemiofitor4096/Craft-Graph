@@ -1,6 +1,5 @@
 package dev.craftgraph.extract;
 
-import dev.craftgraph.api.Models;
 import dev.craftgraph.extract.AdapterRegistry.Candidate;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.crafting.Recipe;
@@ -70,57 +69,5 @@ public final class RecipeAdapters {
                 new VanillaRecipePlatform(registries),
                 VanillaRecipePlatform.context(registries),
                 registry());
-    }
-
-    public static boolean declaresNoOutput(Recipe<?> recipe) {
-        return registry().declaresNoOutput(recipe);
-    }
-
-    /** 读耗时（游戏刻）。没有适配器能处理、或适配器读不到时返回 {@code null}。 */
-    public static Integer duration(Recipe<?> recipe) {
-        return registry().duration(recipe);
-    }
-
-    /** 读机器 id。{@code null} 表示退回 {@link MachineTable} 的推断。 */
-    public static String machine(Recipe<?> recipe) {
-        return registry().machine(recipe);
-    }
-
-    /** 这条配方是否被完整读出。{@code false} 时 extractor 会把整条标成 opaque。 */
-    public static boolean complete(Recipe<?> recipe) {
-        return registry().complete(recipe);
-    }
-
-    /**
-     * 读输入槽位（物品）。
-     *
-     * @param generic 通用接口（{@code getIngredients()}）读出来的槽位
-     * @return 适配器给的槽位；没有适配器能处理、或适配器声明「不归我管」时返回 {@code generic}
-     */
-    public static List<RawSlot> ingredients(Recipe<?> recipe, List<RawSlot> generic) {
-        return registry().ingredients(recipe, generic);
-    }
-
-    /**
-     * 读产出。适配器返回空列表时结果就是空列表（调用方会据此标 opaque），
-     * 见 AdapterRegistry#results。
-     */
-    public static List<Models.ItemStack> results(Recipe<?> recipe, List<Models.ItemStack> generic) {
-        return registry().results(recipe, generic);
-    }
-
-    /** 读概率产出。没有通用回退，返回空列表就是「没有」。 */
-    public static List<Models.ChanceOutput> chanceResults(Recipe<?> recipe) {
-        return registry().chanceResults(recipe);
-    }
-
-    /** 读流体输出。没有通用回退。 */
-    public static List<Models.FluidStack> fluidResults(Recipe<?> recipe) {
-        return registry().fluidResults(recipe);
-    }
-
-    /** 读流体输入。没有通用回退。 */
-    public static List<RawSlot> fluidIngredients(Recipe<?> recipe) {
-        return registry().fluidIngredients(recipe);
     }
 }
