@@ -61,6 +61,13 @@ jobs:
         working-directory: mod
         run: ./gradlew build --no-daemon --stacktrace
 
+      # ⚠️ build 命中 Gradle 缓存时 test 不会执行，ContractDumpTest 也就不写样本。
+      # release 里必须无条件重跑一次，否则 protocol zip 里只有 tiny-pack.json，
+      # 契约样本是空的 —— 这个坑 CI 上已经踩过一次（见 AGENTS.md）。
+      - name: 重新生成契约样本（绕开构建缓存）
+        working-directory: mod
+        run: ./gradlew :core:test --rerun-tasks --no-build-cache --no-daemon
+
       # 这一步是这个 workflow 里最值钱的一道检查。
       #
       # tag 是 v0.1.1 而 gradle.properties 里还是 0.1.0，是很常见的手滑 ——
