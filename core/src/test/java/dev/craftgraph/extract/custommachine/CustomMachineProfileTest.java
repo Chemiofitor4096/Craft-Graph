@@ -46,6 +46,9 @@ class CustomMachineProfileTest {
         assertEquals("machine", PROFILE.machineField());
         assertEquals(RequirementRole.TOOL, PROFILE.roleOf("custommachinery:durability"));
         assertEquals(RequirementRole.INCOMPLETE, PROFILE.roleOf("custommachinery:loot_table"));
+        // 附属模组（custom_machinery_ars）注册的 Source：像能量一样是条件，不是物品原料
+        assertEquals(RequirementRole.CONDITION, PROFILE.roleOf("custommachinery:source"));
+        assertEquals(RequirementRole.CONDITION, PROFILE.roleOf("custommachinery:source_per_tick"));
         // 没写进 profile 的类型按「读不全」处理
         assertEquals(RequirementRole.INCOMPLETE, PROFILE.roleOf("someaddon:magic"));
     }

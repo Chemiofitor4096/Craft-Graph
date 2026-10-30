@@ -37,6 +37,9 @@
     "custommachinery:experience": "CONDITION",
     "custommachinery:experience_per_tick": "CONDITION",
 
+    "custommachinery:source": "CONDITION",
+    "custommachinery:source_per_tick": "CONDITION",
+
     "custommachinery:fluid_per_tick": "INCOMPLETE",
     "custommachinery:fuel": "INCOMPLETE",
     "custommachinery:item_transform": "INCOMPLETE",
