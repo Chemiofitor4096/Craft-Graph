@@ -127,6 +127,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # 契约样本（protocol/fixtures/bridge-dump）由 build 里的 ContractDumpTest 生成。
+      # 发布时和 jar 一起打包，MCP 仓库就能拿同一份字节跑 contract。
+      - name: 上传契约样本
+        uses: actions/upload-artifact@v4
+        with:
+          name: protocol-fixtures
+          path: protocol/fixtures/
+          if-no-files-found: error
+          retention-days: 14
+
   # ------------------------------------------------------- 1.20.1 / MinecraftForge
   #
   # ⚠️ job id 里**不能有点**（GitHub 的约束是 [A-Za-z_][A-Za-z0-9_-]*）。
@@ -254,6 +264,22 @@ jobs:
       - name: 确认四个附件都在
         run: ls -la dist/
 
+      - name: 取回契约样本
+        uses: actions/download-artifact@v4
+        with:
+          name: protocol-fixtures
+          path: protocol/fixtures/
+
+      # 协议包：文档 + 样本。拆仓库之后，MCP 侧靠它拿到「和这一版 jar 完全同源」的字节。
+      - name: 打包协议文档与样本
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          VER="${RELEASE_TAG#v}"
+          zip -r "protocol-${VER}.zip" doc/protocol.md protocol/fixtures
+          ls -la "protocol-${VER}.zip"
+
       # 只有真正的 tag 推送才建 Release。手动触发到这一步为止。
       - name: 发布 GitHub Release
         if: github.event_name == 'push'
@@ -274,7 +300,8 @@ jobs:
             dist/craftgraph-${VER}.jar \
             dist/craftgraph-${VER}-sources.jar \
             dist/craftgraph-${VER}-mc1.20.1.jar \
-            dist/craftgraph-${VER}-mc1.20.1-sources.jar
+            dist/craftgraph-${VER}-mc1.20.1-sources.jar \
+            "protocol-${VER}.zip"
 
       - name: 干跑结束提示
         if: github.event_name == 'workflow_dispatch'
